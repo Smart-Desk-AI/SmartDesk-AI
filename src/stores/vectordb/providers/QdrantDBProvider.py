@@ -13,6 +13,8 @@ class QdrantDBProvider(VectorDBInterface):
         self.db_client=db_client
         #distance method enum check 
         self.distance_method=None
+        self.default_vector_size=default_vector_size
+        self.index_threshold=index_threshold
         self.logger=logging.getLogger("uvicorn")
         if distance_method==DistanceMethodEnum.COSINE.value:
             self.distance_method=DistanceMethodEnum.COSINE.value
