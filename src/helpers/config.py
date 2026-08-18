@@ -63,8 +63,10 @@ class Settings(BaseSettings):
     VECTOR_DB_BACKEND_LITERAL:List[str]=None
     VECTOR_DB_BACKEND:str
     VECTOR_DB_PATH:str
-    VECTOR_DB_DISTANCE_METHOD:str    
-
+    VECTOR_DB_DISTANCE_METHOD:str 
+    VECTOR_DB_PGVEC_INDEX_THRESHOLD:int
+    VECTOR_DB_DEFAULT_VECTOR_SIZE:int
+ 
     
     DEFAULT_LANGUAGE:str="en"
 

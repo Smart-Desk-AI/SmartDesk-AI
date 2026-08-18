@@ -46,6 +46,6 @@ class VectorDBInterface(ABC):
         pass
 
     @abstractmethod
-    def serach_by_vector(self,collection_name:str,vector:List[float],limit:int=5)->List[RetrivedDocument]:
+    def search_by_vector(self,collection_name:str,vector:List[float],limit:int=5)->List[RetrivedDocument]:
         pass
     

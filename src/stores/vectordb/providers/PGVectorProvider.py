@@ -50,9 +50,9 @@ class PGVectorProvider(VectorDBInterface):
 
 
 
-
     async def dis_connect(self):
         pass
+
 
 
     async def is_collection_exists(self,collection_name:str)-> bool :
@@ -63,6 +63,7 @@ class PGVectorProvider(VectorDBInterface):
                 record=result.scalar_one_or_none()
 
         return record      
+
 
 
     async def list_all_collections(self)->list:
@@ -78,6 +79,7 @@ class PGVectorProvider(VectorDBInterface):
         return records
 
     
+
     async def get_collection_info(self,collection_name:str)-> dict:
         async with self.db_client() as session:
             async with session.begin():
@@ -151,7 +153,8 @@ class PGVectorProvider(VectorDBInterface):
                 records=results.scalar_one_or_none()
                 
 
-        return bool(records)  
+        return bool(records)   
+
 
 
     async def create_vector_index(self,collection_name:str,index_type:str=PgVectorVectorIndexMethodEnum.HNSW.value,index_threshold :int=100):
@@ -186,6 +189,7 @@ class PGVectorProvider(VectorDBInterface):
                     
 
 
+
     async def reset_vector_index(self,collection_name:str,index_type:str=PgVectorVectorIndexMethodEnum.HNSW.value):
          
         index_name=await self.get_pgvector_index_name(collection_name=collection_name)
@@ -200,6 +204,7 @@ class PGVectorProvider(VectorDBInterface):
                 return True
 
         return self.create_vector_index(collection_name=collection_name,index_type=index_type)
+
 
 
         
@@ -256,140 +261,105 @@ class PGVectorProvider(VectorDBInterface):
 
 
 
-        async def insert_many_collections(self,collection_name:str,
-                                            texts:List[str]=None,
-                                            embeddings:List[List[float]]=None,
-                                            metadata:List[dict]=None,
-                                            record_ids:List[str]=None,
-                                            batch_size:int=50):
+    async def insert_many_collections(self,collection_name:str,
+                                        texts:List[str]=None,
+                                        embeddings:List[List[float]]=None,
+                                        metadata:List[dict]=None,
+                                        record_ids:List[str]=None,
+                                        batch_size:int=50):
 
 
-            is_collection_existed=await self.is_collection_exists(collection_name=collection_name)
-            if not is_collection_existed:
-                self.logger.error(f"Collection {collection_name} does not exist")
-                return False
-            
-            if len(embedding)!= len(record_ids):
-                self.logger.error(f"Record IDs and Embeddings must be equal")
-                return False
+        is_collection_existed=await self.is_collection_exists(collection_name=collection_name)
+        if not is_collection_existed:
+            self.logger.error(f"Collection {collection_name} does not exist")
+            return False
+        
+        if len(embedding)!= len(record_ids):
+            self.logger.error(f"Record IDs and Embeddings must be equal")
+            return False
 
 
 
-            if len(metadata)==0 or not metadata:
-                metadata=[None]*len(texts) 
+        if len(metadata)==0 or not metadata:
+            metadata=[None]*len(texts) 
+
 
         
             
-            async with self.db_client() as session:
-                async with session.begin():
-                    for i in range(0,len(text),batch_size):
-                        batch_text=text[i:i+batch_size]
-                        batch_vectors=embeddings[i:i+batch_size]
-                        batch_metadata=metadata[i:i+batch_size]
-                        batch_record_ids=record_ids[i:i+batch_size]
+        async with self.db_client() as session:
+            async with session.begin():
+                for i in range(0,len(text),batch_size):
+                    batch_text=text[i:i+batch_size]
+                    batch_vectors=embeddings[i:i+batch_size]
+                    batch_metadata=metadata[i:i+batch_size]
+                    batch_record_ids=record_ids[i:i+batch_size]
 
 
 
-                        values=[]
+                    values=[]
 
-                        for _text,_vector,_metadata,_record_id in zip(batch_text,batch_vectors,batch_metadata,batch_record_ids):
+                    for _text,_vector,_metadata,_record_id in zip(batch_text,batch_vectors,batch_metadata,batch_record_ids):
 
-                            values.append(
-                                {
-                                    "text":_text,
-                                    "metadata":_metadata,
-                                    "vector":"["+ ",".join([str(vector_dim) for vector_dim in _vector]) + "]",
-                                    "chunk_id":_record_id
-                                }
-                            )
-
-
-
-                        batch_insert_sql=sql_text(f"""
-                        INSERT INTO {collection_name}(
-                        {PgVectorTableschemaEnums.TEXT.value},
-                        {PgVectorTableschemaEnums.METADATA.value},
-                        {PgVectorTableschemaEnums.VECTOR.value},
-                        {PgVectorTableschemaEnums.CHUNK_ID.value}
+                        values.append(
+                            {
+                                "text":_text,
+                                "metadata":_metadata,
+                                "vector":"["+ ",".join([str(vector_dim) for vector_dim in _vector]) + "]",
+                                "chunk_id":_record_id
+                            }
                         )
-                        VALUES(
-                            :text,
-                            :metadata,
-                            :vector,
-                            :chunk_id
-                        )
-                    """)
-
-                    
-
-                        await session.execute(insert_sql,values)
-                        await session.commit()
-            return True
 
 
 
-
-
-        async def search_by_vector(self,collection_name:str,
-                                    vector:List[float],
-                                    limit:int=5) -> List[RetrivedDocument]:
-
-
-
-            is_collection_existed=await self.is_collection_exists(collection_name=collection_name)
-            if not is_collection_existed:
-                self.logger.error(f"Collection {collection_name} does not exist ,Cannot search in it")
-                return False
-            
-
-            vector = "["+ ",".join([str(vector_dim) for vector_dim in vector]) + "]"
-
-            async with self.db_client() as session:
-                async with session.begin():
-                    search_sql=sql_text(f"""
-                    SELECT {PgVectorTableschemaEnums.TEXT.value} AS text,
-                    1-{PgVectorTableschemaEnums.VECTOR.value} <=> :vector AS similarity,
-                    FROM {collection_name}
-                    ORDER BY similarity
-                    LIMIT :limit
-                    """)
-
-                    results=await session.execute(search_sql,{"vector":vector,"limit":limit})
-                    results=results.fetchall()
-                    return [RetrivedDocument(**{"score":result.similarity,"text":result.text}) for result in results]
+                    batch_insert_sql=sql_text(f"""
+                    INSERT INTO {collection_name}(
+                    {PgVectorTableschemaEnums.TEXT.value},
+                    {PgVectorTableschemaEnums.METADATA.value},
+                    {PgVectorTableschemaEnums.VECTOR.value},
+                    {PgVectorTableschemaEnums.CHUNK_ID.value}
+                    )
+                    VALUES(
+                        :text,
+                        :metadata,
+                        :vector,
+                        :chunk_id
+                    )
+                """)
 
                 
 
+                    await session.execute(insert_sql,values)
+                    await session.commit()
+        return True
 
+
+
+
+
+    async def search_by_vector(self,collection_name:str,
+                                vector:List[float],
+                                limit:int=5) -> List[RetrivedDocument]:
+
+
+
+        is_collection_existed=await self.is_collection_exists(collection_name=collection_name)
+        if not is_collection_existed:
+            self.logger.error(f"Collection {collection_name} does not exist ,Cannot search in it")
+            return False
         
 
-                
+        vector = "["+ ",".join([str(vector_dim) for vector_dim in vector]) + "]"
 
-                
+        async with self.db_client() as session:
+            async with session.begin():
+                search_sql=sql_text(f"""
+                SELECT {PgVectorTableschemaEnums.TEXT.value} AS text,
+                1-{PgVectorTableschemaEnums.VECTOR.value} <=> :vector AS similarity,
+                FROM {collection_name}
+                ORDER BY similarity
+                LIMIT :limit
+                """)
 
-
-
-            
-
-            
-
-
-
-            
-        
-
-
-
-    
-
-
-        
-
-
-
-
-
-
-
-
-
+                results=await session.execute(search_sql,{"vector":vector,"limit":limit})
+                results=results.fetchall()
+                return [RetrivedDocument(**{"score":result.similarity,"text":result.text}) for result in results]
