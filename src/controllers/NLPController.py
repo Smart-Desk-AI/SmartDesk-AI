@@ -27,7 +27,7 @@ class NLPController(BaseController):
     async def get_vector_collection_info(self,project:Project):
         collection_name=self.create_collection_name(project_id=project.project_id)
         collection_info=await self.vectordb_client.get_collection_info(collection_name=collection_name)
-        return json.loads(json.dumps(collection_info,default=lambda x:x.__dict__))
+        return json.loads(json.dumps(collection_info,default=lambda x: list(x) if isinstance(x, (set, frozenset)) else (x.__dict__ if hasattr(x, '__dict__') else str(x))))
         
 
     async def index_into_vectordb(self,project:Project,chunks:List[DataChunk],chunks_ids:List[int],do_rest=False):
@@ -54,6 +54,8 @@ class NLPController(BaseController):
         #insert_into_vector_db
         _=await self.vectordb_client.insert_many_collections(collection_name=collection_name,texts=texts,embeddings=vectors,metadata=metadata,batch_size=50,record_ids=chunks_ids)
 
+        
+
 
         return True
 
@@ -75,7 +77,7 @@ class NLPController(BaseController):
 
 
         
-        search_results=await self.vectordb_client.serach_by_vector(collection_name=collection_name,vector=query_vector,limit=limit)
+        search_results=await self.vectordb_client.search_by_vector(collection_name=collection_name,vector=query_vector,limit=limit)
 
         if not search_results:
             return False

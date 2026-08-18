@@ -86,7 +86,7 @@ class PGVectorProvider(VectorDBInterface):
     async def get_collection_info(self,collection_name:str)-> dict:
         async with self.db_client() as session:
             async with session.begin():
-                table_info_sql=sql_text(f"SELECT schemaname,tablename,tableowner,tablespace,has_indexes FROM pg_tables WHERE tablename='{collection_name}'")
+                table_info_sql=sql_text(f"SELECT schemaname,tablename,tableowner,tablespace,hasindexes FROM pg_tables WHERE tablename='{collection_name}'")
                 count_sql=sql_text(f"SELECT count(*) FROM {collection_name}")
                 
                 table_info=await session.execute(table_info_sql)
@@ -98,7 +98,7 @@ class PGVectorProvider(VectorDBInterface):
                     return None
 
                 return{
-                    "table_info":dict(table_data),
+                    "table_info": dict(table_data._mapping),
                     "record_count":record_count
                 }
 
@@ -259,8 +259,10 @@ class PGVectorProvider(VectorDBInterface):
                     "metadata":metadata,
                     "vector":"["+ ",".join([str(vector_dim) for vector_dim in embedding]) + "]",
                     "chunk_id":record_id
-                })
+                }).bindparams(bindparam("metadata", type_=JSONB))
+                
                 await session.commit()
+        await self.create_vector_index(collection_name=collection_name)
 
         return True
 
@@ -337,7 +339,9 @@ class PGVectorProvider(VectorDBInterface):
                 
 
                     await session.execute(batch_insert_sql,values)
-                    await session.commit()
+        
+
+        await self.create_vector_index(collection_name=collection_name)
         return True
 
 
@@ -362,7 +366,7 @@ class PGVectorProvider(VectorDBInterface):
             async with session.begin():
                 search_sql=sql_text(f"""
                 SELECT {PgVectorTableschemaEnums.TEXT.value} AS text,
-                1-{PgVectorTableschemaEnums.VECTOR.value} <=> :vector AS similarity
+                1-({PgVectorTableschemaEnums.VECTOR.value} <=> :vector) AS similarity
                 FROM {collection_name}
                 ORDER BY similarity
                 LIMIT :limit
