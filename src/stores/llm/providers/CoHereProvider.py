@@ -101,7 +101,7 @@ class CohereProvider(LLMInterface):
             self.logger.error("No Embeddings generated from Cohere client")
             return None
 
-        return [f for f in response.embeddings.float]
+        return [f for f in response.embeddings]
         
 
 

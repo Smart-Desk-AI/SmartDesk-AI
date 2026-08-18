@@ -19,7 +19,7 @@ from src.models.ChunkModel import ChunkModel
 from src.models.AssetModel import AssetModel
 from src.models.db_schemas import DataChunk, Asset
 from src.models.enums.AssetTypeEnum import AssetTypeEnum
-from src.controllers import NLPController
+from src.controllers.NLPController import NLPController
 logger = logging.getLogger('uvicorn.error')
 
 app_settings = Settings()

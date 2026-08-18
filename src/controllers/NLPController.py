@@ -40,7 +40,7 @@ class NLPController(BaseController):
         texts=[c.chunk_text for c in chunks ]
         metadata=[c.chunk_metadata for c in chunks ]
 
-        vectors=self.embedding_client.embed_text(texts=texts,document_type=DocumentTypeEnum.DOCUMENT.value)
+        vectors=self.embedding_client.embed_text(text=texts,document_type=DocumentTypeEnum.DOCUMENT.value)
 
 
 
@@ -52,7 +52,7 @@ class NLPController(BaseController):
     do_reset=do_rest)
 
         #insert_into_vector_db
-        _=await self.vectordb_client.insert_many_collections(collection_name=collection_name,texts=texts,vectors=vectors,metadata=metadata,batch_size=50,record_ids=chunks_ids)
+        _=await self.vectordb_client.insert_many_collections(collection_name=collection_name,texts=texts,embeddings=vectors,metadata=metadata,batch_size=50,record_ids=chunks_ids)
 
 
         return True

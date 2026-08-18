@@ -50,7 +50,8 @@ async def start_up_span():
     app.db_client=sessionmaker(app.db_engine,class_=AsyncSession,expire_on_commit=False)
     
     
-    llm_provider_factory = LLMProviderFactory(settings)
+    llm_provider_factory = LLMProviderFactory(config=settings)
+       
 
     #generation_client
     app.generation_client = llm_provider_factory.create(settings.GENERATION_BACKEND)  
@@ -67,9 +68,9 @@ async def start_up_span():
 
     #vector_db_client
 
-    vectordb_provider_factory = VectorDBProviderFactory(settings)
+    vectordb_provider_factory=VectorDBProviderFactory(config=settings,db_client=app.db_client)
     app.vectordb_client = vectordb_provider_factory.create(vector_db=settings.VECTOR_DB_BACKEND)
-    app.vectordb_client.connect()
+    await app.vectordb_client.connect()
 
     app.template_parser=TemplateParser(language=settings.PRIMARY_LANGUAGE,default_language=settings.DEFAULT_LANGUAGE)
 
@@ -97,7 +98,7 @@ async def shutdown_span():
     """
     app.db_engine.dispose()
     print("Closed MongoDB connection")  
-    app.vectordb_client.disconnect()
+    await app.vectordb_client.disconnect()
     print("Closed VectorDB connection")
 
 

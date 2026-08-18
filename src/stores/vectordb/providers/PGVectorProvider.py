@@ -5,7 +5,9 @@ import logging
 from src.stores.vectordb.VectorDBEnums import PgVectorVectorIndexMethodEnum,PgVectorDistanceMethodEnum,PgVectorTableschemaEnums
 from src.models.db_schemas import RetrivedDocument  
 from sqlalchemy.sql import text as sql_text
+from sqlalchemy import bindparam
 import json
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 class PGVectorProvider(VectorDBInterface):
@@ -59,7 +61,8 @@ class PGVectorProvider(VectorDBInterface):
         record=None
         async with self.db_client() as session:
             async with session.begin():
-                result=await session.execute(sql_text(f"SELECT * FROM pg_tables WHERE tablename='{collection_name}'"))
+                list_tbl=sql_text(f"SELECT * FROM pg_tables WHERE tablename= :collection_name")
+                result=await session.execute(list_tbl,{"collection_name":collection_name})
                 record=result.scalar_one_or_none()
 
         return record      
@@ -78,7 +81,7 @@ class PGVectorProvider(VectorDBInterface):
 
         return records
 
-    
+
 
     async def get_collection_info(self,collection_name:str)-> dict:
         async with self.db_client() as session:
@@ -129,26 +132,31 @@ class PGVectorProvider(VectorDBInterface):
             async with self.db_client() as session:
                 async with session.begin():
                     create_sql=sql_text(f"""
-                        CREATE TABLE:{collection_name}(
+                        CREATE TABLE {collection_name}(
                         {PgVectorTableschemaEnums.ID.value} BIGSERIAL PRIMARY KEY,
                         {PgVectorTableschemaEnums.TEXT.value} text,
                         {PgVectorTableschemaEnums.METADATA.value} jsonb DEFAULT \'{{}}\',
                         {PgVectorTableschemaEnums.VECTOR.value} vector({embedding_size}),
                         {PgVectorTableschemaEnums.CHUNK_ID.value} integer,
-                        FOREIGN KEY ({PgVectorTableschemaEnums.CHUNK_ID.value}) REFERENCES chunks(chunk_id)
+                        FOREIGN KEY ({PgVectorTableschemaEnums.CHUNK_ID.value}) REFERENCES datachunks(chunk_id)
                     )""")
 
-                    await session.excute(create_sql)
-                    await session.commit()
+                    await session.execute(create_sql)
+                    await session.commit() 
             return True
 
 
 
     async def is_index_existed(self,collection_name:str)->bool:
-        index_name=self.get_pgvector_index_name(collection_name=collection_name)
+        index_name=await self.get_pgvector_index_name(collection_name=collection_name)
         async with self.db_client() as session:
             async with session.begin():
-                check_sql=sql_text(f"SELECT * FROM pg_indexes WHERE tablename='{collection_name} AND indexname='{index_name}'")
+                check_sql = sql_text(f"""
+                    SELECT *
+                    FROM pg_indexes
+                    WHERE tablename = '{collection_name}'
+                    AND indexname = '{index_name}'
+                """)
                 results=await session.execute(check_sql)
                 records=results.scalar_one_or_none()
                 
@@ -174,7 +182,7 @@ class PGVectorProvider(VectorDBInterface):
                 record_count=record_count.scalar_one()
                 if record_count>index_threshold:
                     self.logger.info("Creating HNSW index")
-                    index_name=self.get_pgvector_index_name(collection_name=collection_name)
+                    index_name=await self.get_pgvector_index_name(collection_name=collection_name)
                     create_index_sql=f"""
                     CREATE INDEX {index_name} ON {collection_name} USING HNSW ({PgVectorTableschemaEnums.VECTOR.value} {self.distance_method})
                     """
@@ -274,7 +282,7 @@ class PGVectorProvider(VectorDBInterface):
             self.logger.error(f"Collection {collection_name} does not exist")
             return False
         
-        if len(embedding)!= len(record_ids):
+        if len(embeddings)!= len(record_ids):
             self.logger.error(f"Record IDs and Embeddings must be equal")
             return False
 
@@ -288,8 +296,8 @@ class PGVectorProvider(VectorDBInterface):
             
         async with self.db_client() as session:
             async with session.begin():
-                for i in range(0,len(text),batch_size):
-                    batch_text=text[i:i+batch_size]
+                for i in range(0,len(texts),batch_size):
+                    batch_text=texts[i:i+batch_size]
                     batch_vectors=embeddings[i:i+batch_size]
                     batch_metadata=metadata[i:i+batch_size]
                     batch_record_ids=record_ids[i:i+batch_size]
@@ -311,7 +319,7 @@ class PGVectorProvider(VectorDBInterface):
 
 
 
-                    batch_insert_sql=sql_text(f"""
+                    batch_insert_sql = sql_text(f"""
                     INSERT INTO {collection_name}(
                     {PgVectorTableschemaEnums.TEXT.value},
                     {PgVectorTableschemaEnums.METADATA.value},
@@ -324,11 +332,11 @@ class PGVectorProvider(VectorDBInterface):
                         :vector,
                         :chunk_id
                     )
-                """)
+                    """).bindparams(bindparam("metadata", type_=JSONB))
 
                 
 
-                    await session.execute(insert_sql,values)
+                    await session.execute(batch_insert_sql,values)
                     await session.commit()
         return True
 
@@ -354,7 +362,7 @@ class PGVectorProvider(VectorDBInterface):
             async with session.begin():
                 search_sql=sql_text(f"""
                 SELECT {PgVectorTableschemaEnums.TEXT.value} AS text,
-                1-{PgVectorTableschemaEnums.VECTOR.value} <=> :vector AS similarity,
+                1-{PgVectorTableschemaEnums.VECTOR.value} <=> :vector AS similarity
                 FROM {collection_name}
                 ORDER BY similarity
                 LIMIT :limit
