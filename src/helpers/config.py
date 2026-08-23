@@ -72,6 +72,14 @@ class Settings(BaseSettings):
 
     PRIMARY_LANGUAGE:str="en"
 
+    # ========== SMTP Config ==========
+    SMTP_SERVER: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = None
+    SMTP_PASSWORD: str = None
+    SMTP_SENDER: str = None
+    SMTP_USE_TLS: bool = True
+
 
     class Config:
         env_file=".env"

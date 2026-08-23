@@ -1,4 +1,5 @@
 import logging
+from pydantic import BaseModel
 from fastapi import APIRouter, status, Request
 from fastapi.responses import JSONResponse
 
@@ -17,34 +18,26 @@ conversation_router = APIRouter(
     tags=["api_v1", "conversation"],
 )
 
+# Pydantic schema for the email request body
+class EmailTicketRequest(BaseModel):
+    recipient_email: str
+    smtp_config: dict
+
 
 @conversation_router.post("/chat/{project_id}")
 async def chat(request: Request, project_id: int, search_request: SearchRequest):
-    # 1. Fetch or create project instance
-    project_model = await ProjectModel.create_instance(
-        db_client=request.app.db_client
-    )
-    project = await project_model.get_project_or_create_one(
-        project_id=project_id
-    )
+    project_model = await ProjectModel.create_instance(db_client=request.app.db_client)
+    project = await project_model.get_project_or_create_one(project_id=project_id)
 
     if not project:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            content={
-                "signal": ResponseSignal.PROJECT_NOT_FOUND_ERROR.value
-            }
+            content={"signal": ResponseSignal.PROJECT_NOT_FOUND_ERROR.value}
         )
 
-    # 2. Fetch existing conversation history for this project
-    conversation_model = await ConversationModel.create_instance(
-        db_client=request.app.db_client
-    )
-    conversation = await conversation_model.get_conversation(
-        project_id=project_id
-    )
+    conversation_model = await ConversationModel.create_instance(db_client=request.app.db_client)
+    conversation = await conversation_model.get_conversation(project_id=project_id)
 
-    # 3. Instantiate NLP Controller (Passing conversation_model as db_client)
     conversation_instance = ConversationNLPController(
         db_client=conversation_model,
         vectordb_client=request.app.vectordb_client,
@@ -53,7 +46,6 @@ async def chat(request: Request, project_id: int, search_request: SearchRequest)
         template_parser=request.app.template_parser
     )
 
-    # 4. Process RAG Question & update/create conversation in DB
     answer, full_prompt, rag_context = await conversation_instance.answer_rag_question(
         project=project,
         conversation=conversation,
@@ -61,7 +53,6 @@ async def chat(request: Request, project_id: int, search_request: SearchRequest)
         limit=search_request.limit
     )
 
-    # 5. Formulate API response
     if answer:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -82,20 +73,18 @@ async def chat(request: Request, project_id: int, search_request: SearchRequest)
         }
     )
 
+
 @conversation_router.post("/chat/{project_id}/close")
 async def close_conversation(request: Request, project_id: int):
-    conversation_model = await ConversationModel.create_instance(
-        db_client=request.app.db_client
-    )
-    conversation = await conversation_model.close_conversation(
-        project_id=project_id
-    )
+    conversation_model = await ConversationModel.create_instance(db_client=request.app.db_client)
+    conversation = await conversation_model.close_conversation(project_id=project_id)
+    
     if conversation:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "signal": ResponseSignal.CONVERSATION_CLOSED.value,
-                "conversation": conversation
+                "conversation_id": conversation.conversation_id  # Serialized attribute instead of ORM object
             }
         )
     else:
@@ -103,6 +92,53 @@ async def close_conversation(request: Request, project_id: int):
             status_code=status.HTTP_404_NOT_FOUND,
             content={
                 "signal": ResponseSignal.CONVERSATION_NOT_FOUND.value,
-                "conversation": None
+                "conversation_id": None
+            }
+        )
+
+
+@conversation_router.post("/chat/{project_id}/summarized_ticket_email")
+async def send_summarized_ticket_email(request: Request, project_id: int, payload: EmailTicketRequest):
+    conversation_model = await ConversationModel.create_instance(db_client=request.app.db_client)
+    conversation = await conversation_model.get_conversation(project_id=project_id)
+    
+    if not conversation:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "signal": ResponseSignal.CONVERSATION_NOT_FOUND.value,
+                "conversation_id": None
+            }
+        )
+
+    conversation_instance = ConversationNLPController(
+        db_client=conversation_model,
+        vectordb_client=request.app.vectordb_client,
+        generation_client=request.app.generation_client,
+        embedding_client=request.app.embedding_client,
+        template_parser=request.app.template_parser
+    )
+    
+    # Send email (the method automatically handles summarization if it hasn't been done yet)
+    # Passing payload.smtp_config safely if provided, otherwise the controller falls back to .env
+    email_sent = await conversation_instance.email_ticket_to_customer_service(
+    project_id=project_id,
+    conversation=conversation,
+    recipient_email=payload.recipient_email)
+
+    if email_sent:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "signal": ResponseSignal.SUMMARIZED_AND_EMAILED_SUCCESS.value,
+                "conversation_id": conversation.conversation_id
+            }
+        )
+    else:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "signal": ResponseSignal.SUMMARIZED_AND_EMAILED_FAILED.value,
+                "conversation_id": conversation.conversation_id
             }
         )

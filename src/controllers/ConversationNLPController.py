@@ -13,6 +13,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import asyncio
 from typing import Optional
+from src.helpers.config import get_settings, Settings
+
+
+
 
 
 
@@ -25,6 +29,7 @@ class ConversationNLPController(BaseController):
         self.template_parser = template_parser
         self.vectordb_client = vectordb_client
         self.logger = logging.getLogger('uvicorn.error')
+        self.app_settings = Settings()
 
     def create_table_name(self, project_id: str) -> str:
         return f"collection_384_{project_id}".strip().lower()
@@ -202,26 +207,55 @@ class ConversationNLPController(BaseController):
 
 
 
-    async def summarize_conversation(self,project_id: int, conversation: Conversation):
+    async def summarize_conversation(self, project_id: int, conversation: Conversation):
         if not conversation.content:
             return "No conversation history available to summarize."
         
+        # Ensure the chat history is formatted properly for Cohere API requirements
+        formatted_history = []
+        for message in conversation.content:
+            if isinstance(message, dict):
+                text_content = message.get("message") or message.get("content") or message.get("text")
+                raw_role = message.get("role", "user").lower()
+                
+                # Map internal roles to Cohere's expected capitalized roles: 'User', 'Chatbot', 'System', 'Tool'
+                if raw_role in ["assistant", "bot", "chatbot"]:
+                    role = "Chatbot"
+                elif raw_role in ["system"]:
+                    role = "System"
+                elif raw_role in ["tool"]:
+                    role = "Tool"
+                else:
+                    role = "User"
+                
+                if text_content:
+                    formatted_history.append({
+                        "role": role,
+                        "message": text_content
+                    })
+            elif isinstance(message, str) and message.strip():
+                formatted_history.append({
+                    "role": "User",
+                    "message": message
+                })
+
         summary_prompt = self.template_parser.get("rag", "summary_ticket_prompt")
+        
         summary = self.generation_client.generate_text(
             prompt=summary_prompt,
-            chat_history=conversation.content
+            chat_history=formatted_history
         )
+        
         conversation.summary_ticket = summary
         await self.db_client.update_conversation(conversation=conversation)
         return summary
 
 
 
-    async def email_ticket_to_customer_service(self, project_id: int, conversation: Conversation, 
-                                                recipient_email: str,smtp_config: dict) -> bool:
+    async def email_ticket_to_customer_service(self, project_id: int, conversation: Conversation, recipient_email: str) -> bool:
         """
         Summarizes the conversation (if not already summarized) and emails the ticket summary
-        to customer support using SMTP.
+        to customer support using SMTP configurations from the environment settings.
         """
         # 1. Ensure ticket summary exists
         if not conversation.summary_ticket:
@@ -242,18 +276,24 @@ class ConversationNLPController(BaseController):
         )
 
         msg = MIMEMultipart()
-        msg['From'] = smtp_config.get("sender_email")
+        msg['From'] = self.app_settings.SMTP_SENDER
         msg['To'] = recipient_email
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
         # 3. Offload synchronous SMTP sending to a thread pool to avoid blocking the event loop
         def send_smtp_email():
-            with smtplib.SMTP(smtp_config['server'], smtp_config['port']) as server:
-                if smtp_config.get("use_tls", True):
+            server_host = self.app_settings.SMTP_SERVER
+            server_port = self.app_settings.SMTP_PORT
+
+            if not server_host or not self.app_settings.SMTP_USERNAME:
+                raise ValueError("SMTP server configurations are missing in the settings.")
+
+            with smtplib.SMTP(server_host, int(server_port)) as server:
+                if self.app_settings.SMTP_USE_TLS:
                     server.starttls()
-                if smtp_config.get("username") and smtp_config.get("password"):
-                    server.login(smtp_config["username"], smtp_config["password"])
+                if self.app_settings.SMTP_USERNAME and self.app_settings.SMTP_PASSWORD:
+                    server.login(self.app_settings.SMTP_USERNAME, self.app_settings.SMTP_PASSWORD)
                 server.send_message(msg)
 
         try:

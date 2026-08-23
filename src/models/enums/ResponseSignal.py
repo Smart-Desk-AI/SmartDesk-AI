@@ -46,4 +46,9 @@ class ResponseSignal(Enum):
     SEARCH_FAILED="search_failed"
     RAG_ANSWER_SUCCESS="rag_answer_success"
     RAG_ANSWER_FAILED="rag_answer_failed"
+    SUMMARIZED_AND_EMAILED_SUCCESS="summarized_and_emailed_success"
+    SUMMARIZED_AND_EMAILED_FAILED="summarized_and_emailed_failed"
+    CONVERSATION_CLOSED = "conversation_closed_Success"
+    CONVERSATION_NOT_FOUND = "conversation_not_found"
+
 
