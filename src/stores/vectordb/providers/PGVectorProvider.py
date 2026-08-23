@@ -348,30 +348,36 @@ class PGVectorProvider(VectorDBInterface):
 
 
 
-    async def search_by_vector(self,collection_name:str,
-                                vector:List[float],
-                                limit:int=5) -> List[RetrivedDocument]:
+    async def search_by_vector(self, collection_name: str,vector: List[float],limit: int = 5) -> List[RetrivedDocument]:
 
-
-
-        is_collection_existed=await self.is_collection_exists(collection_name=collection_name)
+        # 1. Ensure the collection exists before searching
+        is_collection_existed = await self.is_collection_exists(collection_name=collection_name)
         if not is_collection_existed:
-            self.logger.error(f"Collection {collection_name} does not exist ,Cannot search in it")
-            return False
-        
+            self.logger.error(f"Collection {collection_name} does not exist, cannot search in it.")
+            return [] 
 
-        vector = "["+ ",".join([str(vector_dim) for vector_dim in vector]) + "]"
+        vector_str = str(vector) 
 
         async with self.db_client() as session:
             async with session.begin():
-                search_sql=sql_text(f"""
+                # FIX: 
+                # a) We calculate similarity as "1 - Cosine Distance" (larger is better).
+                # b) CRITICAL: We ORDER BY the raw Cosine Distance (vector <=> :vector) ascending. 
+                # This ensures we get the most similar vectors first AND allows PostgreSQL to utilize pgvector indexes (like HNSW or IVFFlat).
+                search_sql = sql_text(f"""
                 SELECT {PgVectorTableschemaEnums.TEXT.value} AS text,
-                1-({PgVectorTableschemaEnums.VECTOR.value} <=> :vector) AS similarity
+                       1 - ({PgVectorTableschemaEnums.VECTOR.value} <=> :vector) AS similarity
                 FROM {collection_name}
-                ORDER BY similarity
+                ORDER BY {PgVectorTableschemaEnums.VECTOR.value} <=> :vector ASC
                 LIMIT :limit
                 """)
 
-                results=await session.execute(search_sql,{"vector":vector,"limit":limit})
-                results=results.fetchall()
-                return [RetrivedDocument(**{"score":result.similarity,"text":result.text}) for result in results]
+                # Execute the query with bind parameters for safety and performance
+                results = await session.execute(search_sql, {"vector": vector_str, "limit": limit})
+                results = results.fetchall()
+                
+                # 3. Map the SQLAlchemy Row objects directly to the RetrivedDocument Pydantic model
+                return [
+                    RetrivedDocument(score=result.similarity, text=result.text) 
+                    for result in results
+                ]

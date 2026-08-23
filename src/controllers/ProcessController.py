@@ -9,6 +9,13 @@ from .BaseController import BaseController
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import os
+from typing import List
+from dataclasses import dataclass
+
+@dataclass
+class Document:
+    page_content:str
+    metadata:List[dict]
 
 class ProcessController(BaseController):
     """
@@ -70,28 +77,34 @@ class ProcessController(BaseController):
         return pdf_loader.load() 
 
     def process_file_content(self, file_content: list, file_id: str,
-                              chunk_size: int, overlap_size: int):
-        """
-        Processes loaded document content by splitting it into smaller chunks.
+                            chunk_size: int=100, overlap_size: int=20):
 
-        This is a wrapper around `split_text_into_chunks` that provides a standardized
-        interface for the data pipeline.
+        file_content_texts = [
+            rec.page_content
+            for rec in file_content
+        ]
 
-        Args:
-            file_content (list): The raw document content (list of LangChain Documents).
-            file_id (str): The identifier of the file being processed.
-            chunk_size (int): The maximum character length of each generated chunk.
-            overlap_size (int): The number of characters to overlap between adjacent chunks.
+        file_content_metadata = [
+            rec.metadata
+            for rec in file_content
+        ]
 
-        Returns:
-            list[Document]: The resulting chunked documents.
-        """
-        return self.split_text_into_chunks(
-            document=file_content,
+        # chunks = text_splitter.create_documents(
+        #     file_content_texts,
+        #     metadatas=file_content_metadata
+        # )
+
+        chunks = self.process_simpler_splitter(
+            texts=file_content_texts,
+            metadatas=file_content_metadata,
             chunk_size=chunk_size,
-            chunk_overlap=overlap_size
         )
 
+        return chunks
+
+    
+    
+    
     def split_text_into_chunks(self, document: list, chunk_size: int, chunk_overlap: int):
         """
         Splits a large document into smaller, overlapping chunks.
@@ -123,3 +136,40 @@ class ProcessController(BaseController):
 
         print(f"Number of chunks: {len(chunks)}")
         return chunks
+
+
+
+    def process_simpler_splitter(self,texts:List[str],metadatas:List[dict],chunk_size:int,splitter_tag:str="\n"):
+            full_text=" ".join(texts)
+
+            lines=[doc.strip() for doc in full_text.split(splitter_tag)if len(doc.strip())>1]
+
+            chunks=[]
+            current_chunk=""
+
+
+            for line in lines:
+                current_chunk+=line+splitter_tag
+                if len(current_chunk)>chunk_size:
+                    chunks.append(Document(current_chunk.strip(),metadata=metadatas))
+                    current_chunk=""
+
+
+            if len(current_chunk)>0:
+                chunks.append(Document(current_chunk.strip(),metadata=metadatas))
+
+
+
+            return chunks
+
+            
+
+
+
+
+            
+                
+
+
+
+

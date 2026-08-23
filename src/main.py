@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 # to ensure configurations like MongoDB URI are available.
 load_dotenv("src/.env")
 
-from src.routes import base, data,nlp
+from src.routes import base, data,nlp,conversation
 from src.helpers import config
 from src.stores.llm.LLMProviderFactory import LLMProviderFactory
 from src.stores.vectordb.VectorDBProviderFactory import VectorDBProviderFactory
@@ -122,6 +122,8 @@ app.include_router(data.data_router)
 
 
 app.include_router(nlp.nlp_router)
+
+app.include_router(conversation.conversation_router)
 
 @app.get("/")
 def home():

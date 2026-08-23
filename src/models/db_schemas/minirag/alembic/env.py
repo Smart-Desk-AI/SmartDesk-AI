@@ -1,9 +1,25 @@
 from logging.config import fileConfig
+import sys
+from pathlib import Path
+
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[1])
+)
+
+
+
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from schemas.minirag_base import SQLAlchemyBase
 from alembic import context
+from src.models.db_schemas import (
+    Project,
+    Asset,
+    DataChunk,
+    Conversation,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
