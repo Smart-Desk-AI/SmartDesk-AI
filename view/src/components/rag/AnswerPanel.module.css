@@ -1,0 +1,98 @@
+.card {
+  padding: var(--space-6);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-align: center;
+  gap: var(--space-4);
+}
+
+.emptyIcon {
+  color: var(--color-border);
+  opacity: 0.5;
+}
+
+.loadingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: var(--space-4);
+  color: var(--accent-from);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  height: 100%;
+}
+
+.answerSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.bubble {
+  background: rgba(79, 110, 247, 0.1);
+  border: 1px solid rgba(79, 110, 247, 0.2);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border-top-left-radius: 4px;
+}
+
+.answerText {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.promptSection {
+  margin-top: auto;
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-4);
+}
+
+.toggleBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: color var(--transition-fast);
+}
+
+.toggleBtn:hover {
+  color: var(--text-secondary);
+}
+
+.toggleIcon {
+  font-size: 0.6rem;
+  transition: transform var(--transition-fast);
+}
+
+.codeBlock {
+  margin-top: var(--space-3);
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}

@@ -100,4 +100,8 @@ Return the following JSON structure:
     "technical_details": [],
     "conversation_outcome": "What has already been resolved or what remains unresolved"
 }}
+
+
+
+
 """)

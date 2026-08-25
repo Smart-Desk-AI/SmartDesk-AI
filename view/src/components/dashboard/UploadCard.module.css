@@ -1,0 +1,133 @@
+.card {
+  padding: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.stepBadge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 0 12px rgba(79, 110, 247, 0.4);
+}
+
+.title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  background: rgba(255, 255, 255, 0.02);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dropzone:hover {
+  border-color: var(--accent-from);
+  background: rgba(79, 110, 247, 0.04);
+}
+
+.dragging {
+  border-color: var(--accent-from) !important;
+  background: rgba(79, 110, 247, 0.08) !important;
+  box-shadow: 0 0 20px rgba(79, 110, 247, 0.15);
+}
+
+.hasFile {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.idleState, .uploadingState, .successState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.uploadIcon {
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.dropzone:hover .uploadIcon {
+  color: var(--accent-from);
+}
+
+.dropText {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dropText span {
+  color: var(--accent-from);
+  font-weight: 600;
+}
+
+.dropHint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.uploadingState p {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.successIcon {
+  color: var(--color-success);
+}
+
+.filename {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fileId {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.fileId code {
+  color: var(--color-success);
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.reupload {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -1,0 +1,47 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-4);
+  height: calc(100vh - var(--topbar-height));
+  overflow: hidden;
+}
+
+.chatLayout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: var(--space-5);
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.centerCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+}
+
+.rightCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 960px) {
+  .chatLayout {
+    grid-template-columns: 1fr;
+  }
+  .rightCol {
+    display: none;
+  }
+}
