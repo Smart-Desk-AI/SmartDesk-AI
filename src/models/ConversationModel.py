@@ -50,10 +50,18 @@ class ConversationModel(BaseDataModel):
 
     async def update_conversation(self, conversation: Conversation):
         async with self.db_client() as session:
-            async with session.begin():
-                session.add(conversation) 
+            # Merge or add the updated conversation model instance into the active session
+            conversation = await session.merge(conversation)
+            
+            # Commit changes to the database
             await session.commit()
+            
+            # Refresh to load updated fields (e.g., updated_at timestamp)
             await session.refresh(conversation)
+            
+            # Expunge/detach or access attributes while session is active to avoid DetachedInstanceError
+            session.expunge(conversation)
+            
         return conversation
 
 

@@ -1,1 +1,38 @@
 services:
+  #FastAPI Application
+
+
+
+  #Nginx Service
+
+  #PostgreSQL Service (pgvector)
+  pgvector:
+    image: pgvector/pgvector:0.8.0-pg17
+    container_name: pgvector
+    ports:
+      - "5433:5432"
+    volumes:
+      - 'pgvector:/var/lib/postgresql/data'
+    env-file:
+      - 
+      
+
+
+  #Qdrant Service(Vector DB)
+
+
+  #Prometheus Service(Monitoring & Metrics)
+
+
+  #Grafana Service(Dashboard & Visualization)
+
+
+  #Node Exporter(Server Metrics)
+
+
+
+  #Postgres Exporter (PostgreSQL Metrics)
+
+
+
+

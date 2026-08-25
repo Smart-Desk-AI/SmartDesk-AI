@@ -43,7 +43,7 @@ class CohereProvider(LLMInterface):
         return text[:self.default_input_max_characters].strip()
     
 
-    def generate_text(self, prompt:str,chat_history:list=[],max_output_tokens:int=None,temprature:float=None) -> str:
+    def generate_text(self, prompt: str, chat_history: list = None, max_output_tokens: int = None, temperature: float = None) -> str:
         if not self.client:
             self.logger.error("Cohere client is not initialized")
             return None
@@ -52,19 +52,24 @@ class CohereProvider(LLMInterface):
             self.logger.error("Generation model id is not set")
             return None
 
-        max_tokens=max_output_tokens if max_output_tokens else self.default_output_max_characters
-        temprature=temprature if temprature else self.default_tempreture
-        chat_history.append(self.construct_prompt(prompt))
+        # Safely set default parameters without mutating function signatures
+        max_tokens = max_output_tokens if max_output_tokens else self.default_output_max_characters
+        temp = temperature if temperature is not None else self.default_tempreture
 
+        # Do NOT append prompt to chat_history. Keep chat_history only for previous turns.
+        # Ensure chat_history is passed as a fresh list if None or empty.
+        formatted_chat_history = list(chat_history) if chat_history else None
+
+        # Execute Cohere chat request
         response = self.client.chat(
             model=self.generation_model_id,
-            chat_history=chat_history,
+            chat_history=formatted_chat_history,
             message=self.process_text(prompt),
             max_tokens=max_tokens,
-            temperature=temprature
+            temperature=temp
         )
 
-        if not response or not response.text or len(response.text)==0 :
+        if not response or not response.text or len(response.text) == 0:
             self.logger.error("No response from Cohere client")
             return None
 

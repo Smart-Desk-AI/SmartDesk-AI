@@ -31,16 +31,26 @@ export default function ChatPage() {
   };
 
   const handleSendMessage = async (query: string) => {
-    // Optimistically add user message
-    const userMsg: ChatMessage = { role: 'user', content: query };
+    if (!query.trim() || isSending || isClosed) return;
+
+    // Optimistically add user message to UI
+    const userMsg: ChatMessage = { role: 'user', content: query.trim() };
     setMessages((prev) => [...prev, userMsg]);
     setIsSending(true);
 
     try {
-      const res = await api.chat(projectId, { text: query });
+      const res = await api.chat(projectId, { text: query.trim() });
 
-      if (res.conversation_history && res.conversation_history.length > 0) {
-        setMessages(res.conversation_history);
+      if (res.conversation_history && Array.isArray(res.conversation_history) && res.conversation_history.length > 0) {
+        // Normalize returned history
+        const normalized: ChatMessage[] = res.conversation_history.map((item: any) => {
+          const rawRole = (item.role || 'assistant').toString().toLowerCase();
+          const role: 'user' | 'assistant' =
+            rawRole === 'user' || rawRole === 'human' ? 'user' : 'assistant';
+          const content = item.content || item.message || item.text || (typeof item === 'string' ? item : '');
+          return { role, content };
+        });
+        setMessages(normalized);
       } else if (res.answer) {
         setMessages((prev) => [...prev, { role: 'assistant', content: res.answer! }]);
       }
@@ -49,7 +59,8 @@ export default function ChatPage() {
         setRetrievedDocs(res.retrieved_documents);
       }
     } catch (e: unknown) {
-      addToast(`Chat error: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
+      const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+      addToast(`Chat error: ${errorMsg}`, 'error');
     } finally {
       setIsSending(false);
     }
@@ -60,12 +71,29 @@ export default function ChatPage() {
     try {
       const res = await api.closeConversation(projectId);
       setIsClosed(true);
-      addToast(`Conversation closed (ID: ${res.conversation_id})`, 'info');
+      addToast(`Conversation closed (ID: ${res.conversation_id || 'N/A'})`, 'info');
     } catch (e: unknown) {
       addToast(`Failed to close conversation: ${e instanceof Error ? e.message : 'Unknown error'}`, 'error');
     } finally {
       setIsClosing(false);
     }
+  };
+
+  const handleStartNewConversation = async () => {
+    // If there is an active session with messages, close it on the backend first
+    if (!isClosed && messages.length > 0) {
+      try {
+        await api.closeConversation(projectId);
+      } catch {
+        // Ignore if already closed or not found
+      }
+    }
+
+    // Reset UI state for a fresh conversation
+    setMessages([]);
+    setRetrievedDocs([]);
+    setIsClosed(false);
+    addToast('Started a new conversation session.', 'info');
   };
 
   const handleSendEmailTicket = async (recipientEmail: string) => {
@@ -105,6 +133,7 @@ export default function ChatPage() {
             <ChatControls
               isClosed={isClosed}
               onCloseChat={handleCloseConversation}
+              onNewChat={handleStartNewConversation}
               onOpenEmailModal={() => setIsEmailModalOpen(true)}
               isClosing={isClosing}
               messageCount={messages.length}

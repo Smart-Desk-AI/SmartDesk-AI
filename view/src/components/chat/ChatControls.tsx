@@ -5,6 +5,7 @@ import styles from './ChatControls.module.css';
 interface Props {
   isClosed: boolean;
   onCloseChat: () => void;
+  onNewChat: () => void;
   onOpenEmailModal: () => void;
   isClosing: boolean;
   messageCount: number;
@@ -13,6 +14,7 @@ interface Props {
 export default function ChatControls({
   isClosed,
   onCloseChat,
+  onNewChat,
   onOpenEmailModal,
   isClosing,
   messageCount,
@@ -30,6 +32,21 @@ export default function ChatControls({
       </div>
 
       <div className={styles.actions}>
+        {/* Start New Conversation Button */}
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={onNewChat}
+          title="Start a fresh conversation session"
+          style={{ width: '100%' }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          New Conversation
+        </button>
+
+        {/* Email Support Ticket */}
         <button
           className="btn btn-secondary btn-sm"
           onClick={onOpenEmailModal}
@@ -44,6 +61,7 @@ export default function ChatControls({
           Email Support Ticket
         </button>
 
+        {/* Close Conversation */}
         {!isClosed && (
           <button
             className="btn btn-danger btn-sm"

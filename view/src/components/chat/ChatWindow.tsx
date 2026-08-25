@@ -5,7 +5,7 @@ import { ChatMessage } from '@/lib/api';
 import styles from './ChatWindow.module.css';
 
 interface Props {
-  messages: ChatMessage[];
+  messages: (ChatMessage | Record<string, any>)[];
   isLoading: boolean;
 }
 
@@ -32,10 +32,21 @@ export default function ChatWindow({ messages, isLoading }: Props) {
   return (
     <div className={styles.window}>
       {messages.map((msg, i) => {
-        // Skip system prompts in the UI
-        if (msg.role === 'system') return null;
+        if (!msg) return null;
 
-        const isUser = msg.role === 'user';
+        // Safely extract role and content regardless of naming convention
+        const rawRole = typeof msg === 'object' ? (msg.role || 'user').toString().toLowerCase() : 'user';
+        if (rawRole === 'system') return null;
+
+        const isUser = rawRole === 'user' || rawRole === 'human';
+        const itemAny = msg as any;
+        const textContent =
+          typeof msg === 'string'
+            ? msg
+            : itemAny.content || itemAny.message || itemAny.text || '';
+
+        if (!textContent && !isLoading) return null;
+
         return (
           <div key={i} className={`${styles.messageWrapper} ${isUser ? styles.wrapperUser : styles.wrapperAssistant}`}>
             {!isUser && (
@@ -46,7 +57,7 @@ export default function ChatWindow({ messages, isLoading }: Props) {
               </div>
             )}
             <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
-              {msg.content}
+              {textContent}
             </div>
           </div>
         );
@@ -66,7 +77,7 @@ export default function ChatWindow({ messages, isLoading }: Props) {
           </div>
         </div>
       )}
-      
+
       <div ref={bottomRef} />
     </div>
   );

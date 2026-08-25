@@ -37,6 +37,11 @@ class ConversationNLPController(BaseController):
         return f"collection_384_{project_id}".strip().lower()
     
     async def reformalize_conversation(self, project_id: int, query: str, history_messages: List):
+        # Return the original query directly if there is no chat history
+        if not history_messages:
+            return query
+
+        # Format the prompt using the chat history and current input query
         reformatted_chat_history = reformat_query_prompt.invoke(
             {
                 "chat_history": history_messages,
@@ -44,11 +49,16 @@ class ConversationNLPController(BaseController):
             }
         )
 
+        # Convert the formatted PromptValue into a plain string
+        prompt_text = reformatted_chat_history.to_string()
+
+        # Send the formatted prompt string to Cohere for query reformulation
         reformalized_query = self.generation_client.generate_text(
-            prompt=reformatted_chat_history.to_string()
+            prompt=prompt_text
         )
 
-        return reformalized_query
+        # Clean trailing whitespaces and return, falling back to original query if response is empty
+        return reformalized_query.strip() if reformalized_query else query
 
     async def history_aware_retriever(self, project_id: int, query: str, history_messages: List, limit: int = 5):
         reformatted_query = await self.reformalize_conversation(
@@ -177,25 +187,30 @@ class ConversationNLPController(BaseController):
         ]
 
 # 6. Apply state persistence logic: UPDATE existing vs. CREATE new
+        # 6. Apply state persistence logic: UPDATE existing vs. CREATE new
         if conversation:
-        # Case A: Conversation exists -> Append new messages and update DB
-            if not conversation.content:
-                conversation.content = []
+            # Case A: Conversation exists -> Copy & reassign to trigger SQLAlchemy JSON mutation detection
+            current_content = list(conversation.content) if conversation.content else []
+            current_content.extend(new_messages)
             
-            conversation.content.extend(new_messages)
+            # Reassign explicitly so SQLAlchemy marks the column as updated
+            conversation.content = current_content
+            
             await self.db_client.update_conversation(conversation=conversation)
         else:
-        # Generate a concise title from the initial user query (e.g., first 50 characters)
+            # Generate a concise title from the initial user query (e.g., first 50 characters)
             conversation_title = query[:50].strip() if query else "New Conversation"
 
-        # Case B: No conversation exists -> Create a new Conversation ORM instance with title
+            # Case B: No conversation exists -> Create a new Conversation ORM instance with title
             new_conversation_obj = Conversation(
                 conversation_project_id=project.project_id,
                 title=conversation_title,
-                content=new_messages)
+                content=new_messages
+            )
             await self.db_client.create_conversation(
                 project_id=project.project_id, 
-                conversation=new_conversation_obj)
+                conversation=new_conversation_obj
+            )
         
         # 7. Convert Pydantic/dataclass document objects to dictionaries for clean JSON serialization
         formatted_docs = [
