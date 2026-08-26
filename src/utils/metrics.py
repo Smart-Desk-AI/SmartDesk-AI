@@ -25,11 +25,11 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         return response
 
 
-    def setup_metrics(app: FastAPI):
-        app.add_middleware(PrometheusMiddleware)
+def setup_metrics(app: FastAPI):
+    app.add_middleware(PrometheusMiddleware)
 
-        @app.get("/TrhBVer",include_in_schema=False)
-        async def metrics():
-            return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    @app.get("/TrhBVer",include_in_schema=False)
+    async def metrics():
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
     
     
