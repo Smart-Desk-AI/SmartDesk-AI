@@ -43,11 +43,9 @@ class PGVectorProvider(VectorDBInterface):
 
     async def connect(self):
         async with self.db_client() as session:
-            async with session.begin():
-                await session.execute(sql_text(f"CREATE EXTENSION IF NOT EXISTS vector;"))
-                self.logger.info("Extension 'vector' enabled successfully")
-                self.logger.info("PGVectorProvider connected")
-            await session.commit()
+            await session.execute(sql_text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            self.logger.info("Extension 'vector' enabled successfully")
+            self.logger.info("PGVectorProvider connected")
             return True    
 
 
