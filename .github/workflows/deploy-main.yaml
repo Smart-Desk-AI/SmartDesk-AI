@@ -16,9 +16,9 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
-          host: ${{ secrets.SSH_DEVELOP_HOST_IP }}
+          host: ${{ secrets.SSH_MAIN_HOST_IP }}
           username: github_user
-          key: ${{ secrets.SSH_DEVELOP_PRIVATE_KEY }}
+          key: ${{ secrets.SSH_MAIN_PRIVATE_KEY }}
           script: |
             cd /home/github_user/workspace/SmartDesk-AI
             git checkout main
