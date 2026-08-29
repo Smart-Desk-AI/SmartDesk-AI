@@ -25,22 +25,22 @@ footer_prompt = Template("\n".join([
 reformat_query_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
-        """Given the chat history and the latest user query,
-formulate a standalone query that can be understood
-without the chat history.
+        """You are a strict query reformulation assistant. Your ONLY job is to reformulate the user's latest query so it can be understood without the chat history.
 
-Rules:
-- Do NOT answer the query.
-- Preserve the original meaning.
-- Resolve references such as "it", "this", "that", "they", etc.
-  using the chat history.
-- If the query is already standalone, return it unchanged.
-- Do not add information that is not present in the conversation.
-- Return ONLY the standalone query.
+CRITICAL RULES:
+1. NEVER answer the query.
+2. NEVER repeat older questions from the chat history. 
+3. Focus ONLY on the "Latest User Query" provided at the end.
+4. Resolve references (it, this, they) using the history.
+5. If the latest query is already standalone, return it EXACTLY as it is.
+6. Return ONLY the reformulated query text, with no prefixes, no explanations, and no quotes.
 """
     ),
     MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}")
+    (
+        "human", 
+        "Latest User Query to reformulate: {input}"
+    )
 ])
 
 footer_prompt_for_chatting = Template("\n".join([
@@ -48,7 +48,7 @@ footer_prompt_for_chatting = Template("\n".join([
     "## Answer:"
 ]))
 
-# تم تعديل هذا القالب ليستخدم $conversation وأقواس مفردة للـ JSON ليتوافق مع string.Template
+
 summary_ticket_prompt = Template("""You are an AI customer support ticket generator.
 
 Your task is to analyze the complete conversation between a customer and an AI support assistant and convert it into a concise, professional, and actionable support ticket.

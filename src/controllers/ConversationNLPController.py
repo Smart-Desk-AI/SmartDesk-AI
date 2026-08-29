@@ -33,6 +33,7 @@ class ConversationNLPController(BaseController):
         if not history_messages:
             return query
 
+        # Convert dictionary history format into LangChain Message objects
         formatted_messages = []
         for msg in history_messages:
             if isinstance(msg, dict):
@@ -53,21 +54,33 @@ class ConversationNLPController(BaseController):
                 input=query
             )
             
-            # اطبع شكل اليمين أو الـ Prompt المتجه للـ LLM للتأكد
-            self.logger.info(f"Sending prompt to LLM for reformulation. Current Query: '{query}'")
-
             reformalized_query = self.generation_client.generate_text(
                 prompt=prompt_value.to_string()
             )
 
+            # 1. Fallback if the model returns nothing
             if not reformalized_query or not reformalized_query.strip():
-                self.logger.warning(f"Reformulation returned empty. Falling back to original: '{query}'")
+                self.logger.warning(f"Reformulation empty. Using original query: '{query}'")
                 return query
 
             cleaned_query = reformalized_query.strip()
-            
-            # لو الـ LLM رجع السؤال القديم بالظبط رغم وجود هيدر، ممكن تفرض عليه يكمل أو تسجله في اللوجز
-            self.logger.info(f"Successfully Reformatted Query: '{query}' -> '{cleaned_query}'")
+
+            # 2. Extract the first user message from the history to use as a guardrail
+            first_user_msg = ""
+            for msg in history_messages:
+                if isinstance(msg, dict) and msg.get("role") in ["user", "human"]:
+                    first_user_msg = msg.get("content", "").strip()
+                    break
+                elif hasattr(msg, "type") and msg.type == "human":
+                    first_user_msg = msg.content.strip()
+                    break
+
+            # 3. Guardrail: If the LLM just regurgitated the old question, reject it
+            if first_user_msg and cleaned_query.lower() == first_user_msg.lower():
+                self.logger.warning(f"LLM incorrectly returned the old history question. Bypassing and using new query: '{query}'")
+                return query 
+
+            self.logger.info(f"Reformatted Query: '{query}' -> '{cleaned_query}'")
             return cleaned_query
 
         except Exception as e:
