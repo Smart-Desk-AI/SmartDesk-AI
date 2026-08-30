@@ -30,61 +30,112 @@ class ConversationNLPController(BaseController):
         return f"collection_384_{project_id}".strip().lower()
 
     async def reformalize_conversation(self, project_id: int, query: str, history_messages: List) -> str:
+        """
+        Reformalize query to be standalone, but WITHOUT using chat history in the LLM call.
+        The chat history can contaminate the reformulation.
+        Instead, we manually extract context from history and inject it as instructions.
+        """
         if not history_messages:
             return query
 
-        # Convert dictionary history format into LangChain Message objects
-        formatted_messages = []
+        # Extract last user query to understand context
+        last_user_query = None
+        for msg in reversed(history_messages):
+            msg_role = msg.get("role", "").lower() if isinstance(msg, dict) else ""
+            if msg_role in ["user", "human"]:
+                last_user_query = msg.get("content", "").strip()
+                break
+
+        self.logger.info(f"reformalize_conversation: current='{query}' | previous='{last_user_query}'")
+
+        # SIMPLE approach: Just return the query as-is if it's already standalone
+        # Check if query already contains enough context clues
+        context_words = ["what", "how", "when", "where", "which", "who", "shopify", "payment", "method"]
+        has_context = any(word in query.lower() for word in context_words)
+        
+        if has_context and len(query) > 5:
+            self.logger.info(f"Query is already standalone: '{query}'")
+            return query
+
+        # If query is vague (like "tell me more", "what about", etc), add minimal context
+        if last_user_query and ("more" in query.lower() or "about" in query.lower() or "that" in query.lower()):
+            reformed = f"{query} regarding {last_user_query}"
+            self.logger.info(f"Reformatted: '{query}' -> '{reformed}'")
+            return reformed
+
+        # Default: return as-is
+        self.logger.info(f"Returning query as-is: '{query}'")
+        return query
+
+    # ALTERNATIVE: If you want to use LLM reformulation, use THIS simpler prompt:
+    async def reformalize_conversation_with_llm(self, project_id: int, query: str, history_messages: List) -> str:
+        """
+        Use LLM for reformulation with a VERY strict, simple prompt.
+        No chat history passed to LLM (to avoid contamination).
+        """
+        if not history_messages:
+            return query
+
+        # Create a SIMPLE summary of what was discussed (no full messages)
+        context_topics = []
         for msg in history_messages:
-            if isinstance(msg, dict):
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role in ["user", "human"]:
-                    formatted_messages.append(HumanMessage(content=content))
-                elif role in ["assistant", "bot", "chatbot"]:
-                    formatted_messages.append(AIMessage(content=content))
-                elif role == "system":
-                    formatted_messages.append(SystemMessage(content=content))
-            else:
-                formatted_messages.append(msg)
+            msg_role = msg.get("role", "").lower() if isinstance(msg, dict) else ""
+            msg_content = msg.get("content", "").strip() if isinstance(msg, dict) else ""
+            
+            if msg_role in ["user", "human"] and msg_content:
+                # Extract first 50 chars as topic hint
+                topic = msg_content[:50]
+                context_topics.append(topic)
+
+        context_hint = " | ".join(context_topics[-2:]) if context_topics else ""  # Last 2 queries only
+
+        # CRITICAL: Create prompt WITHOUT chat history to avoid LLM hallucination
+        simple_reform_prompt = f"""You are a query reformulation assistant. Your ONLY job is to take a question and make it standalone by adding minimal context.
+
+STRICT RULES:
+1. Return ONLY the reformulated query, nothing else
+2. Do NOT add preambles like "According to..."
+3. Do NOT change the meaning of the question
+4. If the question is already standalone, return it EXACTLY as-is
+5. Keep it short and simple
+
+Previous conversation topics: {context_hint}
+Current question: {query}
+
+Reformulated standalone query (ONLY the query, no explanation):"""
 
         try:
-            prompt_value = reformat_query_prompt.format_prompt(
-                chat_history=formatted_messages,
-                input=query
-            )
+            reformed = self.generation_client.generate_text(prompt=simple_reform_prompt)
             
-            reformalized_query = self.generation_client.generate_text(
-                prompt=prompt_value.to_string()
-            )
-
-            # 1. Fallback if the model returns nothing
-            if not reformalized_query or not reformalized_query.strip():
-                self.logger.warning(f"Reformulation empty. Using original query: '{query}'")
+            if not reformed or not reformed.strip():
+                self.logger.warning(f"Reformulation returned empty. Using original: '{query}'")
                 return query
 
-            cleaned_query = reformalized_query.strip()
-
-            # 2. Extract the first user message from the history to use as a guardrail
-            first_user_msg = ""
+            cleaned = reformed.strip()
+            
+            # Safety check: if it's way longer than original or contains answer preambles, reject it
+            if len(cleaned) > len(query) * 2:
+                self.logger.warning(f"Reformulation too long ({len(cleaned)} chars). Using original: '{query}'")
+                return query
+            
+            if any(phrase in cleaned.lower() for phrase in ["according to", "based on", "the provided", "here is", "here's"]):
+                self.logger.warning(f"Reformulation contains preamble. Using original: '{query}'")
+                return query
+            
+            # Check if it's the same as any history message (guardrail)
             for msg in history_messages:
-                if isinstance(msg, dict) and msg.get("role") in ["user", "human"]:
-                    first_user_msg = msg.get("content", "").strip()
-                    break
-                elif hasattr(msg, "type") and msg.type == "human":
-                    first_user_msg = msg.content.strip()
-                    break
-
-            # 3. Guardrail: If the LLM just regurgitated the old question, reject it
-            if first_user_msg and cleaned_query.lower() == first_user_msg.lower():
-                self.logger.warning(f"LLM incorrectly returned the old history question. Bypassing and using new query: '{query}'")
-                return query 
-
-            self.logger.info(f"Reformatted Query: '{query}' -> '{cleaned_query}'")
-            return cleaned_query
-
+                msg_role = msg.get("role", "").lower() if isinstance(msg, dict) else ""
+                if msg_role in ["assistant", "bot", "chatbot"]:
+                    msg_content = msg.get("content", "").strip() if isinstance(msg, dict) else ""
+                    if msg_content and msg_content[:100].lower() in cleaned.lower():
+                        self.logger.warning(f"Reformulation matches assistant response. Using original: '{query}'")
+                        return query
+            
+            self.logger.info(f"Reformatted: '{query}' -> '{cleaned}'")
+            return cleaned
+            
         except Exception as e:
-            self.logger.error(f"Error reformulating query: {str(e)}")
+            self.logger.error(f"Error reformulating: {str(e)}")
             return query
 
     async def history_aware_retriever(self, project_id: int, query: str, history_messages: List, limit: int = 5):
@@ -188,15 +239,30 @@ class ConversationNLPController(BaseController):
         # 2. Return early if no relevant documents are retrieved
         if not docs_results:
             footer_prompt = self.template_parser.get("rag", "footer_prompt")
-            full_prompt = "\n\n".join([f"سؤال المستخدم: {reformatted_query}", footer_prompt])
+            full_prompt = "\n\n".join([f"User question: {reformatted_query}", footer_prompt])
         
-            return None, full_prompt, {
+            # LLM will return "information not available" message
+            system_prompt = self.template_parser.get("rag", "system_prompt")
+            chat_history = [
+                self.generation_client.construct_prompt(
+                    prompt=system_prompt, 
+                    role=self.generation_client.enums.SYSTEM.value
+                )
+            ]
+            
+            answer = self.generation_client.generate_text(
+                prompt=full_prompt,
+                chat_history=chat_history
+            )
+            
+            return answer, full_prompt, {
                 "conversation_history": conversation.content if conversation else [],
                 "retrieved_documents": []
             }
 
         # 3. Construct system, document, and footer prompts
         system_prompt = self.template_parser.get("rag", "system_prompt")
+        
         document_prompts = "\n\n".join([
             self.template_parser.get("rag", "document_prompt", {
                 "doc_num": idx + 1,
@@ -212,6 +278,7 @@ class ConversationNLPController(BaseController):
             )
         ]
 
+        # Add conversation history to chat context
         if conversation and conversation.content:
             for msg in conversation.content:
                 role_val = self.generation_client.enums.USER.value if msg.get("role") in ["user", "human"] else self.generation_client.enums.ASSISTANT.value
@@ -222,9 +289,10 @@ class ConversationNLPController(BaseController):
                     )
                 )
 
+        # Build full_prompt with original query
         full_prompt = "\n\n".join([
-            f"السياق المتاح:\n{document_prompts}",
-            f"سؤال المستخدم: {reformatted_query}",
+            f"Context:\n{document_prompts}",
+            f"User question: {query}",
             footer_prompt
         ])
 
@@ -317,7 +385,7 @@ class ConversationNLPController(BaseController):
             "conversation": conversation_text_for_prompt
         })
     
-        # Generate the summary text (Synchronous call, removed the incorrect 'await')
+        # Generate the summary text
         summary = self.generation_client.generate_text(
             prompt=summary_prompt
         )
