@@ -1,8 +1,7 @@
-###RAG TEMPLATE ###
-from string import Template 
+from string import Template
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-system_prompt=Template("\n".join([
+system_prompt = Template("\n".join([
     "You are an assistant to generate a response based on the context provided by the user. ",
     "\n",
     "Your role is to generate a response that is accurate and concise, based on the context provided by the documents",
@@ -14,42 +13,40 @@ system_prompt=Template("\n".join([
     "Your answer should be in the same language the user asked the question in",
 ]))
 
-#Document
-document_prompt=Template("\n".join(["##Document No: $doc_num","###Content: $chunk_text"]))
+# Document
+document_prompt = Template("\n".join(["##Document No: $doc_num", "###Content: $chunk_text"]))
 
-#Footer
-footer_prompt=Template("\n".join(["Based only on the above documents, please generate an answer for the user. ",
-"## Answer:"]))
-
-
-
-
-
+# Footer
+footer_prompt = Template("\n".join([
+    "Based only on the above documents, please generate an answer for the user. ",
+    "## Answer:"
+]))
 
 reformat_query_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
-        """Given the chat history and the latest user query,
-formulate a standalone query that can be understood
-without the chat history.
+        """You are a strict query reformulation assistant. Your ONLY job is to reformulate the user's latest query so it can be understood without the chat history.
 
-Rules:
-- Do NOT answer the query.
-- Preserve the original meaning.
-- Resolve references such as "it", "this", "that", "they", etc.
-  using the chat history.
-- If the query is already standalone, return it unchanged.
-- Do not add information that is not present in the conversation.
-- Return ONLY the standalone query.
+CRITICAL RULES:
+1. NEVER answer the query.
+2. NEVER repeat older questions from the chat history. 
+3. Focus ONLY on the "Latest User Query" provided at the end.
+4. Resolve references (it, this, they) using the history.
+5. If the latest query is already standalone, return it EXACTLY as it is.
+6. Return ONLY the reformulated query text, with no prefixes, no explanations, and no quotes.
 """
     ),
     MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}")
+    (
+        "human", 
+        "Latest User Query to reformulate: {input}"
+    )
 ])
 
-
-footer_prompt_for_chatting=Template("\n".join(["Based only on the above documents, please generate an answer for the user. ",
-"## Answer:"]))
+footer_prompt_for_chatting = Template("\n".join([
+    "Based only on the above documents, please generate an answer for the user. ",
+    "## Answer:"
+]))
 
 
 summary_ticket_prompt = Template("""You are an AI customer support ticket generator.
@@ -60,7 +57,7 @@ The ticket will be reviewed by a human support agent, so focus only on informati
 
 Conversation:
 
-{conversation}
+$conversation
 
 Instructions:
 
@@ -84,7 +81,7 @@ Priority rules:
 
 Return the following JSON structure:
 
-{{
+{
     "title": "Short descriptive title of the issue",
     "summary": "Concise summary of the conversation and the customer's issue",
     "customer_issue": "The main problem or request reported by the customer",
@@ -92,16 +89,12 @@ Return the following JSON structure:
     "priority": "low | medium | high | critical",
     "category": "The most appropriate support category",
     "status": "open",
-    "customer_information": {{
+    "customer_information": {
         "name": null,
         "email": null,
         "phone": null
-    }},
+    },
     "technical_details": [],
     "conversation_outcome": "What has already been resolved or what remains unresolved"
-}}
-
-
-
-
+}
 """)

@@ -1,31 +1,24 @@
-from src.models import ConversationModel
-from src.models import ConversationModel
-from src.models import ConversationModel
-from src.models import ConversationModel
-from src.models import ConversationModel
 import json
-from typing import List, Optional
+import logging
+import smtplib
+import asyncio
+from typing import List, Optional, Dict, Any
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
 from src.controllers.BaseController import BaseController 
 from src.stores.llm.LLMEnums import DocumentTypeEnum
 from src.stores.llm.templates.locales.en.rag import reformat_query_prompt
 from src.models.db_schemas import Project, DataChunk, Conversation
-import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import asyncio
-from typing import Optional
 from src.helpers.config import get_settings, Settings
 
 
-
-
-
-
 class ConversationNLPController(BaseController):
-    def __init__(self, db_client,generation_client, template_parser, vectordb_client, embedding_client):
+    def __init__(self, db_client, generation_client, template_parser, vectordb_client, embedding_client):
         super().__init__()
-        self.db_client=db_client
+        self.db_client = db_client
         self.generation_client = generation_client
         self.embedding_client = embedding_client
         self.template_parser = template_parser
@@ -35,42 +28,88 @@ class ConversationNLPController(BaseController):
 
     def create_table_name(self, project_id: str) -> str:
         return f"collection_384_{project_id}".strip().lower()
-    
-    async def reformalize_conversation(self, project_id: int, query: str, history_messages: List):
-        # Return the original query directly if there is no chat history
+
+    async def reformalize_conversation(self, project_id: int, query: str, history_messages: List) -> str:
         if not history_messages:
             return query
 
-        # Format the prompt using the chat history and current input query
-        reformatted_chat_history = reformat_query_prompt.invoke(
-            {
-                "chat_history": history_messages,
-                "input": query
-            }
-        )
+        # Convert dictionary history format into LangChain Message objects
+        formatted_messages = []
+        for msg in history_messages:
+            if isinstance(msg, dict):
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role in ["user", "human"]:
+                    formatted_messages.append(HumanMessage(content=content))
+                elif role in ["assistant", "bot", "chatbot"]:
+                    formatted_messages.append(AIMessage(content=content))
+                elif role == "system":
+                    formatted_messages.append(SystemMessage(content=content))
+            else:
+                formatted_messages.append(msg)
 
-        # Convert the formatted PromptValue into a plain string
-        prompt_text = reformatted_chat_history.to_string()
+        try:
+            prompt_value = reformat_query_prompt.format_prompt(
+                chat_history=formatted_messages,
+                input=query
+            )
+            
+            reformalized_query = self.generation_client.generate_text(
+                prompt=prompt_value.to_string()
+            )
 
-        # Send the formatted prompt string to Cohere for query reformulation
-        reformalized_query = self.generation_client.generate_text(
-            prompt=prompt_text
-        )
+            # 1. Fallback if the model returns nothing
+            if not reformalized_query or not reformalized_query.strip():
+                self.logger.warning(f"Reformulation empty. Using original query: '{query}'")
+                return query
 
-        # Clean trailing whitespaces and return, falling back to original query if response is empty
-        return reformalized_query.strip() if reformalized_query else query
+            cleaned_query = reformalized_query.strip()
+
+            # 2. Extract the first user message from the history to use as a guardrail
+            first_user_msg = ""
+            for msg in history_messages:
+                if isinstance(msg, dict) and msg.get("role") in ["user", "human"]:
+                    first_user_msg = msg.get("content", "").strip()
+                    break
+                elif hasattr(msg, "type") and msg.type == "human":
+                    first_user_msg = msg.content.strip()
+                    break
+
+            # 3. Guardrail: If the LLM just regurgitated the old question, reject it
+            if first_user_msg and cleaned_query.lower() == first_user_msg.lower():
+                self.logger.warning(f"LLM incorrectly returned the old history question. Bypassing and using new query: '{query}'")
+                return query 
+
+            self.logger.info(f"Reformatted Query: '{query}' -> '{cleaned_query}'")
+            return cleaned_query
+
+        except Exception as e:
+            self.logger.error(f"Error reformulating query: {str(e)}")
+            return query
 
     async def history_aware_retriever(self, project_id: int, query: str, history_messages: List, limit: int = 5):
+        self.logger.info(f"history_aware_retriever called with {len(history_messages)} history messages for query: '{query}'")
+
         reformatted_query = await self.reformalize_conversation(
             project_id=project_id,
             query=query,
             history_messages=history_messages
         )
 
-        query_embedding = self.embedding_client.embed_text(
+        self.logger.info(f"Final Query used for embedding & search: '{reformatted_query}'")
+
+        vectors = self.embedding_client.embed_text(
             text=reformatted_query,
             document_type=DocumentTypeEnum.QUERY
-        )[0]
+        )
+        
+        if not vectors:
+            return reformatted_query, []
+
+        query_embedding = vectors[0] if isinstance(vectors, list) and len(vectors) > 0 else None
+        
+        if not query_embedding:
+            return reformatted_query, []
 
         collection_name = self.create_table_name(project_id)
 
@@ -130,8 +169,9 @@ class ConversationNLPController(BaseController):
         return search_results or []
 
     async def answer_rag_question(self, project: Project, conversation: Optional[Conversation], query: str, limit: int = 5):
-    # 1. Retrieve context documents based on whether conversation history exists
-        if conversation and conversation.content:
+        # 1. Retrieve context documents based on whether conversation history exists
+        if conversation and conversation.content and len(conversation.content) > 0:
+            self.logger.info(f"Using history-aware retriever. History size: {len(conversation.content)}")
             reformatted_query, docs_results = await self.history_aware_retriever(
                 project_id=project.project_id,
                 query=query,
@@ -139,6 +179,7 @@ class ConversationNLPController(BaseController):
                 limit=limit
             )
         else:
+            self.logger.info(f"No history or empty history. Using direct retrieval.")
             reformatted_query = query
             docs_results = await self.search_vector_db_collection(project=project, text=query, limit=limit)
 
@@ -146,9 +187,8 @@ class ConversationNLPController(BaseController):
     
         # 2. Return early if no relevant documents are retrieved
         if not docs_results:
-            system_prompt = self.template_parser.get("rag", "system_prompt")
             footer_prompt = self.template_parser.get("rag", "footer_prompt")
-            full_prompt = "\n\n".join([reformatted_query, footer_prompt])
+            full_prompt = "\n\n".join([f"سؤال المستخدم: {reformatted_query}", footer_prompt])
         
             return None, full_prompt, {
                 "conversation_history": conversation.content if conversation else [],
@@ -157,7 +197,7 @@ class ConversationNLPController(BaseController):
 
         # 3. Construct system, document, and footer prompts
         system_prompt = self.template_parser.get("rag", "system_prompt")
-        document_prompts = "\n".join([
+        document_prompts = "\n\n".join([
             self.template_parser.get("rag", "document_prompt", {
                 "doc_num": idx + 1,
                 "chunk_text": self.generation_client.process_text(doc.text)
@@ -168,13 +208,27 @@ class ConversationNLPController(BaseController):
         chat_history = [
             self.generation_client.construct_prompt(
                 prompt=system_prompt, 
-            role=self.generation_client.enums.SYSTEM.value
-        )
-    ]
+                role=self.generation_client.enums.SYSTEM.value
+            )
+        ]
 
-        full_prompt = "\n\n".join([reformatted_query, document_prompts, footer_prompt])
+        if conversation and conversation.content:
+            for msg in conversation.content:
+                role_val = self.generation_client.enums.USER.value if msg.get("role") in ["user", "human"] else self.generation_client.enums.ASSISTANT.value
+                chat_history.append(
+                    self.generation_client.construct_prompt(
+                        prompt=msg.get("content", ""),
+                        role=role_val
+                    )
+                )
 
-    # 4. Generate the response text from the LLM
+        full_prompt = "\n\n".join([
+            f"السياق المتاح:\n{document_prompts}",
+            f"سؤال المستخدم: {reformatted_query}",
+            footer_prompt
+        ])
+
+        # 4. Generate the response text from the LLM
         answer = self.generation_client.generate_text(
             prompt=full_prompt,
             chat_history=chat_history
@@ -186,49 +240,46 @@ class ConversationNLPController(BaseController):
             {"role": "assistant", "content": answer}
         ]
 
-# 6. Apply state persistence logic: UPDATE existing vs. CREATE new
         # 6. Apply state persistence logic: UPDATE existing vs. CREATE new
         if conversation:
-            # Case A: Conversation exists -> Copy & reassign to trigger SQLAlchemy JSON mutation detection
             current_content = list(conversation.content) if conversation.content else []
             current_content.extend(new_messages)
-            
-            # Reassign explicitly so SQLAlchemy marks the column as updated
             conversation.content = current_content
-            
-            await self.db_client.update_conversation(conversation=conversation)
+            updated_conv = await self.db_client.update_conversation(conversation=conversation)
+            # Use the returned updated conversation object
+            if updated_conv:
+                conversation = updated_conv
+                self.logger.info(f"Updated conversation with {len(current_content)} messages")
+            else:
+                self.logger.warning(f"Update returned None, using local conversation object")
         else:
-            # Generate a concise title from the initial user query (e.g., first 50 characters)
             conversation_title = query[:50].strip() if query else "New Conversation"
-
-            # Case B: No conversation exists -> Create a new Conversation ORM instance with title
             new_conversation_obj = Conversation(
                 conversation_project_id=project.project_id,
                 title=conversation_title,
                 content=new_messages
             )
-            await self.db_client.create_conversation(
+            conversation = await self.db_client.create_conversation(
                 project_id=project.project_id, 
                 conversation=new_conversation_obj
             )
+            self.logger.info(f"Created new conversation with ID: {conversation.conversation_id if conversation else 'Unknown'}")
         
-        # 7. Convert Pydantic/dataclass document objects to dictionaries for clean JSON serialization
+        # 7. Convert Pydantic/dataclass document objects to dictionaries
         formatted_docs = [
             doc.dict() if hasattr(doc, 'dict') else doc.__dict__ 
             for doc in docs_results
         ]
 
         return answer, full_prompt, {
-        "conversation_history": conversation.content if conversation else new_messages,
-        "retrieved_documents": formatted_docs}
-
-
+            "conversation_history": conversation.content if conversation else new_messages,
+            "retrieved_documents": formatted_docs
+        }
 
     async def summarize_conversation(self, project_id: int, conversation: Conversation) -> str:
         if not conversation.content:
             return "No conversation history available to summarize."
     
-    # Format chat history properly for Cohere / API requirements
         formatted_history = []
         for message in conversation.content:
             if isinstance(message, dict):
@@ -258,46 +309,46 @@ class ConversationNLPController(BaseController):
         if not formatted_history:
             return "No valid conversation content to summarize."
 
-        summary_prompt = self.template_parser.get("rag", "summary_ticket_prompt")
+        # Convert the dictionary list to a clear text representation for the Prompt
+        conversation_text_for_prompt = "\n".join([f"{msg['role']}: {msg['message']}" for msg in formatted_history])
+
+        # Inject the conversation directly into the Template variable '$conversation'
+        summary_prompt = self.template_parser.get("rag", "summary_ticket_prompt", {
+            "conversation": conversation_text_for_prompt
+        })
     
-    
-        summary = await self.generation_client.generate_text(prompt=summary_prompt,chat_history=formatted_history)
+        # Generate the summary text (Synchronous call, removed the incorrect 'await')
+        summary = self.generation_client.generate_text(
+            prompt=summary_prompt
+        )
         
-    
         conversation.summary_ticket = summary
         await self.db_client.update_conversation(conversation=conversation)
         return summary
 
-
     async def email_ticket_to_customer_service(self, project_id: int, conversation: Conversation, recipient_email: str) -> bool:
-        """
-        Summarizes the conversation (if not already summarized) and emails the ticket summary
-        to customer support using SMTP configurations from environment settings.
-        """
-        # 1. Ensure ticket summary exists
         if not conversation.summary_ticket:
             summary = await self.summarize_conversation(project_id=project_id, conversation=conversation)
         else:
             summary = conversation.summary_ticket
 
-        # 2. Build scannable email payload
         subject = f"[Support Ticket #{conversation.conversation_id}] Project {project_id}"
     
         body = f"""==================================================
-            NEW SUPPORT TICKET
-        ==================================================
+NEW SUPPORT TICKET
+==================================================
 
-            [ METADATA ]
-            • Project ID      : {project_id}
-            • Conversation ID : {conversation.conversation_id}
-            • Session UUID    : {conversation.conversation_uuid}
+[ METADATA ]
+• Project ID      : {project_id}
+• Conversation ID : {conversation.conversation_id}
+• Session UUID    : {conversation.conversation_uuid}
 
-            [ SUMMARY & ACTION ITEMS ]
-            {summary}
+[ SUMMARY & ACTION ITEMS ]
+{summary}
 
-        --------------------------------------------------
-        Automated summary generated from user conversation.
-        =================================================="""
+--------------------------------------------------
+Automated summary generated from user conversation.
+=================================================="""
 
         msg = MIMEMultipart()
         msg['From'] = self.app_settings.SMTP_SENDER
@@ -305,7 +356,6 @@ class ConversationNLPController(BaseController):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        # 3. Offload synchronous SMTP sending to thread pool
         def send_smtp_email():
             server_host = self.app_settings.SMTP_SERVER
             server_port = self.app_settings.SMTP_PORT
@@ -313,13 +363,11 @@ class ConversationNLPController(BaseController):
             if not server_host or not self.app_settings.SMTP_USERNAME:
                 raise ValueError("SMTP server configurations are missing in settings.")
 
-        
             if server_port == 465:
                 with smtplib.SMTP_SSL(server_host, server_port, timeout=10) as server:
                     if self.app_settings.SMTP_USERNAME and self.app_settings.SMTP_PASSWORD:
                         server.login(self.app_settings.SMTP_USERNAME, self.app_settings.SMTP_PASSWORD)
                     server.send_message(msg)
-        
             else:
                 with smtplib.SMTP(server_host, server_port, timeout=10) as server:
                     if getattr(self.app_settings, 'SMTP_USE_TLS', True):

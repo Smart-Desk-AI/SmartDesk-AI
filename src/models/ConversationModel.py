@@ -26,7 +26,6 @@ class ConversationModel(BaseDataModel):
             async with session.begin():
                 session.add(conversation)
 
-            await session.commit()
             await session.refresh(conversation)
 
         return conversation
@@ -45,8 +44,12 @@ class ConversationModel(BaseDataModel):
 
             if conversation is None:
                 return None
-            else:
-                return conversation
+            
+            # ACCESS content BEFORE returning (while still in session)
+            # Force load of the content attribute
+            _ = conversation.content
+            
+            return conversation
 
     async def update_conversation(self, conversation: Conversation):
         async with self.db_client() as session:
@@ -136,9 +139,3 @@ class ConversationModel(BaseDataModel):
             await session.commit()
             await session.refresh(conversation)
             return conversation
-
-
-
-
-
-
