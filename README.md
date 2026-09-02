@@ -1,8 +1,8 @@
-﻿# SmartDesk-AI
+# SmartDesk-AI
 
 > **AI-Powered Customer Support System** using Retrieval-Augmented Generation (RAG) and Large Language Models (LLMs)
 
-SmartDesk AI is a production-ready backend platform that combines RAG, multi-provider LLMs, conversation management, ticket summarization, and email automation — all built on a clean, modular, provider-agnostic architecture.
+SmartDesk AI is a production-ready full-stack platform that combines RAG, multi-provider LLMs, conversation management, ticket summarization, email automation, a Next.js frontend, and a complete observability stack — all built on a clean, modular, provider-agnostic architecture.
 
 ---
 
@@ -20,6 +20,8 @@ SmartDesk AI is a production-ready backend platform that combines RAG, multi-pro
 - [Environment Variables](#environment-variables)
 - [Docker Setup](#docker-setup)
 - [Database Migrations (Alembic)](#database-migrations-alembic)
+- [Monitoring & Observability](#monitoring--observability)
+- [Frontend (Next.js)](#frontend-nextjs)
 - [Workflow](#workflow)
 - [Roadmap](#roadmap--upcoming-features)
 
@@ -28,48 +30,48 @@ SmartDesk AI is a production-ready backend platform that combines RAG, multi-pro
 ## Architecture Overview
 
 ```text
-Customer Request
-      |
-      v
-FastAPI Backend (Async)
-      |
-      +─────────────────────────────────────────────+
-      |                                             |
-      v                                             v
-RAG Pipeline                              Conversation Manager
-      |                                             |
-      +──> Vector DB (Qdrant OR pgvector)           +──> PostgreSQL (SQLAlchemy)
-      |         - Semantic search                   |         - Projects
-      |         - Embedding indexing                |         - Conversations (JSONB)
-      |                                             |         - DataChunks
-      +──> Knowledge Base                           |         - Assets
-            - FAQs                                  |
-            - Company Policies                  MongoDB (Motor - async)
-            - Refund Policies                       - Projects
-            - Shipping Policies                     - Chunks
-            - Product Documentation                 - Assets
-            - Support Guides
-      |
-      v
-LLM Provider (OpenAI OR Cohere)
-      |
-      +──> Generate Answer
-      |
-      v
-Customer Response
+                          ┌──────────────────────────────────────┐
+                          │          Nginx Reverse Proxy          │
+                          │        (Port 80 — entry point)        │
+                          └──────────┬───────────────┬────────────┘
+                                     │               │
+                              /api/* │               │ /* (UI)
+                                     ▼               ▼
+                             FastAPI Backend    Next.js Frontend
+                             (Async, Port 8000)  (Port 3000)
+                                     │
+              ┌──────────────────────┼──────────────────────┐
+              │                      │                       │
+              ▼                      ▼                       ▼
+        RAG Pipeline        Conversation Manager     Prometheus Metrics
+              │                      │               (PrometheusMiddleware)
+    ┌─────────┴───────┐    ┌─────────┴──────┐
+    ▼                 ▼    ▼                ▼
+Qdrant            pgvector  PostgreSQL   SMTP Email
+(Vector DB)     (pgvector)  (SQLAlchemy)  (asyncio)
+                              │
+                     Projects / Conversations
+                     DataChunks / Assets (JSONB)
 
 ==============================================
 
 When Conversation Ends:
-      |
-      v
+      │
+      ▼
 ConversationNLPController
-      |
+      │
       +──> Summarize Conversation (LLM)
-      |
+      │
       +──> Store Summary in PostgreSQL
-      |
+      │
       +──> Email Ticket to Customer Service (SMTP)
+
+==============================================
+
+Observability Stack:
+  Prometheus (scrapes /metrics) ──> Grafana Dashboards
+  Node Exporter (system metrics)
+  Postgres Exporter (PostgreSQL metrics)
 ```
 
 ---
@@ -112,8 +114,28 @@ ConversationNLPController
 - Multi-locale template parser supporting `en` (and extensible to other languages)
 - Templates for: `system_prompt`, `document_prompt`, `footer_prompt`, `summary_ticket_prompt`, and query reformalization via LangChain
 
+### ✅ Monitoring & Observability
+- **Prometheus Middleware**: Custom `PrometheusMiddleware` in `src/utils/metrics.py` tracks HTTP request counts and latency by method, endpoint, and status code
+- **Metrics Endpoint**: Exposed via `setup_metrics(app)` — scraped automatically by Prometheus
+- **Grafana**: Visualization dashboards for FastAPI, PostgreSQL, Qdrant, and system metrics
+- **Node Exporter**: System-level metrics (CPU, memory, disk)
+- **Postgres Exporter**: PostgreSQL-specific metrics fed into Prometheus
+
+### ✅ CORS Support
+- **CORSMiddleware** configured to allow requests from `http://localhost:3000` and `http://127.0.0.1:3000` (the Next.js dev server)
+
+### ✅ Next.js Frontend
+- Full **Next.js 16 + React 19** frontend in the `view/` directory
+- Pages: **Chat** (`/chat`), **Dashboard** (`/dashboard`), **RAG** (`/rag`)
+- Typed API client (`view/src/lib/api.ts`) wrapping all 10 backend endpoints
+- Containerized via `view/Dockerfile` and served through the Nginx reverse proxy
+
 ### ✅ Docker Infrastructure
-- Docker Compose setup running **MongoDB** and **pgvector** (PostgreSQL with the pgvector extension) as containerized services with persistent volumes and a shared backend network
+- **Fully containerized** stack: FastAPI, Next.js frontend, Nginx, pgvector, Qdrant, Prometheus, Grafana, Node Exporter, Postgres Exporter
+- All services share a `backend` bridge network with named Docker volumes for persistence
+- Structured `env/` directory for per-service environment files
+- FastAPI waits for pgvector to pass a healthcheck before starting (`depends_on: condition: service_healthy`)
+- Optional **systemd service** file (`docker/minirag.service`) for running as a Linux daemon
 
 ---
 
@@ -122,10 +144,19 @@ ConversationNLPController
 ### Backend
 | Component | Technology |
 |---|---|
-| Framework | FastAPI 0.104 |
+| Framework | FastAPI ≥ 0.110 |
 | Runtime | Python (asyncio / async-first) |
 | Server | Uvicorn |
 | Configuration | Pydantic Settings + `.env` |
+| CORS | FastAPI CORSMiddleware |
+
+### Frontend
+| Component | Technology |
+|---|---|
+| Framework | Next.js 16 |
+| UI Library | React 19 |
+| Language | TypeScript |
+| API Client | Typed fetch wrapper (`lib/api.ts`) |
 
 ### AI & NLP
 | Component | Technology |
@@ -146,13 +177,18 @@ ConversationNLPController
 ### Vector Databases
 | Component | Technology |
 |---|---|
-| Option A | Qdrant (via qdrant-client) |
+| Option A | Qdrant (via qdrant-client, containerized) |
 | Option B | pgvector (PostgreSQL extension, via pgvector + SQLAlchemy) |
 
-### Infrastructure
+### Infrastructure & Observability
 | Component | Technology |
 |---|---|
 | Containerization | Docker + Docker Compose |
+| Reverse Proxy | Nginx (stable-alpine) |
+| Metrics | Prometheus + prometheus-client |
+| Dashboards | Grafana |
+| System Metrics | Node Exporter |
+| DB Metrics | Postgres Exporter |
 | Email | SMTP (smtplib, async via asyncio.to_thread) |
 
 ---
@@ -198,9 +234,10 @@ VECTOR_DB_PATH=qdrant_db
 VECTOR_DB_DISTANCE_METHOD=cosine
 ```
 
-- Lightweight, in-process or server mode
+- Available as a **Docker service** (`qdrant/qdrant:v1.13.6`) on ports `6333` (HTTP) and `6334` (gRPC)
 - Supports cosine and dot-product distance
 - Collections are created and deleted per project
+- Dashboard: `http://localhost:6333/dashboard`
 
 ### pgvector (PostgreSQL Extension)
 
@@ -290,6 +327,12 @@ EMBEDDING_MODEL_SIZE=1024
 | POST | `/api/v1/conversation/chat/{project_id}/close` | Close the active conversation |
 | POST | `/api/v1/conversation/chat/{project_id}/summarized_ticket_email` | Summarize conversation and email ticket to support team |
 
+### Observability
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/TrhBVer` | Prometheus metrics scrape endpoint (hidden from docs) |
+
 ---
 
 ## Project Structure
@@ -297,13 +340,43 @@ EMBEDDING_MODEL_SIZE=1024
 ```
 SmartDesk-AI/
 ├── docker/
-│   ├── docker-compose.yml          # MongoDB + pgvector containers
-│   ├── .env.example
-│   └── mongodb/
+│   ├── docker-compose.yml          # Full stack: FastAPI, Frontend, Nginx, pgvector,
+│   │                               #   Qdrant, Prometheus, Grafana, Node/Postgres Exporters
+│   ├── minirag.service             # Systemd service file for Linux daemon deployment
+│   ├── env/
+│   │   ├── .env.example.app        # FastAPI app env template
+│   │   ├── .env.example.postgres   # PostgreSQL env template
+│   │   ├── .env.example.grafana    # Grafana env template
+│   │   └── .env.example.postgres-exporter
+│   ├── minirag/
+│   │   ├── Dockerfile              # FastAPI container image
+│   │   └── alembic.example.ini
+│   ├── nginx/
+│   │   └── default.conf            # Reverse proxy (/ → frontend, /api → FastAPI)
+│   └── prometheus/
+│       └── prometheus.yml          # Prometheus scrape config
+├── view/                           # Next.js 16 + React 19 frontend
+│   ├── Dockerfile
+│   ├── package.json
+│   └── src/
+│       ├── app/
+│       │   ├── chat/               # Chat UI page
+│       │   ├── dashboard/          # Project dashboard page
+│       │   └── rag/                # RAG search/answer page
+│       ├── components/
+│       │   ├── chat/
+│       │   ├── dashboard/
+│       │   ├── layout/
+│       │   └── rag/
+│       ├── context/                # React context providers
+│       └── lib/
+│           └── api.ts              # Typed API client (wraps all 10 backend endpoints)
 ├── src/
-│   ├── main.py                     # FastAPI app, lifespan events, route registration
+│   ├── main.py                     # FastAPI app, lifespan events, CORS, metrics, routes
 │   ├── requirements.txt
 │   ├── .env.example
+│   ├── utils/
+│   │   └── metrics.py              # PrometheusMiddleware + setup_metrics()
 │   ├── helpers/
 │   │   └── config.py               # Pydantic Settings (all env vars)
 │   ├── routes/
@@ -323,6 +396,7 @@ SmartDesk-AI/
 │   │   ├── ChunkModel.py           # Chunk DB operations (paginated)
 │   │   ├── AssetModel.py           # Asset DB operations
 │   │   ├── ConversationModel.py    # Conversation CRUD + close logic
+│   │   ├── MessagesModel.py        # Messages model (stub)
 │   │   ├── BaseDataModel.py
 │   │   ├── enums/
 │   │   │   ├── DataBaseEnum.py     # Collection names, ConversationStatusEnum
@@ -370,6 +444,7 @@ SmartDesk-AI/
 ### Prerequisites
 
 - Python 3.10+
+- Node.js 18+ (for frontend development)
 - Docker & Docker Compose
 - PostgreSQL (or use the Docker service)
 - An OpenAI or Cohere API key
@@ -380,7 +455,11 @@ SmartDesk-AI/
 git clone https://github.com/your-org/SmartDesk-AI.git
 cd SmartDesk-AI
 
+# Backend
 pip install -r src/requirements.txt
+
+# Frontend (optional, for local dev)
+cd view && npm install && cd ..
 ```
 
 ### 2. Configure Environment
@@ -390,16 +469,37 @@ cp src/.env.example src/.env
 # Edit src/.env with your credentials (see Environment Variables section)
 ```
 
-### 3. Start Infrastructure (Docker)
+### 3. Start Infrastructure (Docker — Recommended)
 
 ```bash
 cd docker
-cp .env.example .env
-# Set MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD, POSTGRES_PASSWORD
-docker compose up -d
+
+# Copy and fill in per-service environment files
+cd env
+cp .env.example.app .env.app
+cp .env.example.postgres .env.postgres
+cp .env.example.grafana .env.grafana
+cp .env.example.postgres-exporter .env.postgres-exporter
+cd ..
+
+# Copy Alembic config
+cd minirag && cp alembic.example.ini alembic.ini && cd ..
+
+# Start everything
+docker compose up --build -d
 ```
 
-### 4. Run Database Migrations
+To start services incrementally (recommended first time):
+
+```bash
+# Start databases first
+docker compose up -d pgvector qdrant postgres-exporter
+sleep 30
+# Start remaining services
+docker compose up -d fastapi frontend nginx prometheus grafana node-exporter --build
+```
+
+### 4. Run Database Migrations (local dev)
 
 ```bash
 cd src/models/db_schemas/minirag
@@ -409,14 +509,25 @@ cp alembic.ini.example alembic.ini
 alembic upgrade head
 ```
 
-### 5. Start the Server
+### 5. Start the Server (local dev)
 
 ```bash
+# Backend
 uvicorn src.main:app --reload
+
+# Frontend (in a separate terminal)
+cd view && npm run dev
 ```
 
-The API will be available at `http://localhost:8000`.
-Interactive docs: `http://localhost:8000/docs`
+| Service | URL |
+|---|---|
+| FastAPI API | `http://localhost:8000` |
+| Swagger Docs | `http://localhost:8000/docs` |
+| Next.js Frontend | `http://localhost:3000` |
+| Nginx (entry point) | `http://localhost` |
+| Prometheus | `http://localhost:9090` |
+| Grafana | `http://localhost:3000` (via Docker) |
+| Qdrant Dashboard | `http://localhost:6333/dashboard` |
 
 ---
 
@@ -478,20 +589,38 @@ SMTP_USE_TLS=True
 
 ## Docker Setup
 
-The `docker/docker-compose.yml` file provisions two services:
+The `docker/docker-compose.yml` provisions the full stack:
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
-| `mongodb` | `mongo:7-jammy` | `27007:27017` | Document store for projects, chunks, assets |
+| `fastapi` | Custom (Dockerfile) | `8000:8000` | FastAPI backend |
+| `frontend` | Custom (view/Dockerfile) | — | Next.js frontend (served via Nginx) |
+| `nginx` | `nginx:stable-alpine3.20-perl` | `80:80` | Reverse proxy (`/api/*` → FastAPI, `/*` → frontend) |
 | `pgvector` | `pgvector/pgvector:0.8.0-pg17` | `5432:5432` | Relational DB + vector similarity search |
+| `qdrant` | `qdrant/qdrant:v1.13.6` | `6333:6333`, `6334:6334` | Vector DB (HTTP + gRPC) |
+| `prometheus` | `prom/prometheus:v3.3.0` | `9090:9090` | Metrics collection |
+| `grafana` | `grafana/grafana:11.6.0-ubuntu` | `3000:3000` | Metrics visualization |
+| `node-exporter` | `prom/node-exporter:v1.9.1` | `9100:9100` | System-level metrics |
+| `postgres-exporter` | `prometheuscommunity/postgres-exporter:v0.17.1` | `9187:9187` | PostgreSQL metrics |
 
-Both services share a `backend` bridge network and use named Docker volumes for data persistence.
+All services share a `backend` bridge network and use named Docker volumes for data persistence.
 
 ```bash
 cd docker
-docker compose up -d         # Start services
-docker compose down          # Stop services
-docker compose down -v       # Stop and remove volumes
+docker compose up --build -d          # Start all services
+docker compose down                   # Stop services
+docker compose down -v                # Stop and remove volumes
+docker compose down -v --remove-orphans  # Full cleanup
+```
+
+### Systemd Deployment (Linux)
+
+A `minirag.service` file is provided for running the full stack as a Linux system service:
+
+```bash
+sudo cp docker/minirag.service /etc/systemd/system/
+sudo systemctl enable minirag
+sudo systemctl start minirag
 ```
 
 ---
@@ -519,16 +648,94 @@ alembic downgrade -1
 
 ---
 
+## Monitoring & Observability
+
+### Prometheus Metrics
+
+FastAPI exposes Prometheus metrics via the `PrometheusMiddleware` in `src/utils/metrics.py`:
+
+- **`http_request_total`** — Counter by `method`, `endpoint`, `status`
+- **`http_request_duration_seconds`** — Histogram by `method`, `endpoint`
+
+Prometheus scrapes these automatically based on `docker/prometheus/prometheus.yml`.
+
+### Grafana Dashboards
+
+After starting Grafana at `http://localhost:3000` (credentials set in `.env.grafana`):
+
+1. Add Prometheus as a data source: `http://prometheus:9090`
+2. Import community dashboards:
+
+| Dashboard | URL |
+|---|---|
+| FastAPI Observability | https://grafana.com/grafana/dashboards/18739 |
+| Node Exporter Full | https://grafana.com/grafana/dashboards/1860 |
+| Qdrant | https://grafana.com/grafana/dashboards/23033 |
+| PostgreSQL Exporter | https://grafana.com/grafana/dashboards/12485 |
+
+---
+
+## Frontend (Next.js)
+
+The `view/` directory contains a **Next.js 16 + React 19 + TypeScript** frontend.
+
+### Pages
+
+| Route | Description |
+|---|---|
+| `/` | Landing / redirect |
+| `/dashboard` | Project management dashboard |
+| `/chat` | History-aware RAG chat interface |
+| `/rag` | Direct RAG search and answer panel |
+
+### Typed API Client
+
+`view/src/lib/api.ts` provides a fully-typed client wrapping all 10 backend endpoints:
+
+```typescript
+import { api } from '@/lib/api';
+
+// Upload a file
+const result = await api.upload(projectId, file);
+
+// History-aware chat
+const response = await api.chat(projectId, { text: "What is your refund policy?" });
+
+// Email ticket
+await api.emailTicket(projectId, { recipient_email: "support@company.com", smtp_config: {} });
+```
+
+### Running the Frontend Locally
+
+```bash
+cd view
+npm install
+npm run dev   # http://localhost:3000
+```
+
+Override the backend URL:
+
+```env
+# view/.env.local
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+The Nginx reverse proxy (Docker) routes all traffic through port `80`:
+- `http://localhost/` → Next.js frontend
+- `http://localhost/api/*` → FastAPI backend
+
+---
+
 ## Workflow
 
 ### Step 1 — Upload Knowledge Base
 `POST /api/v1/upload/{project_id}` — Upload PDFs or documents. Files are streamed to disk and recorded as assets in the database.
 
 ### Step 2 — Process & Chunk
-`POST /api/v1/process/{project_id}` — Extract text, split into overlapping chunks using LangChain, and store them in the database. Supports full-reset mode to re-process files.
+`POST /api/v1/process/{project_id}` — Extract text, split into overlapping chunks using LangChain, and store them in the database. Supports full-reset mode to re-process files (also clears the associated vector collection).
 
 ### Step 3 — Index into Vector DB
-`POST /api/v1/nlp/index/push/{project_id}` — Embed all chunks using the configured embedding provider and upsert into Qdrant or pgvector in batches.
+`POST /api/v1/nlp/index/push/{project_id}` — Embed all chunks using the configured embedding provider and upsert into Qdrant or pgvector in batches. Progress is tracked with a `tqdm` progress bar in the server logs.
 
 ### Step 4 — Chat with RAG
 `POST /api/v1/conversation/chat/{project_id}` — Customer sends a query. The system:
@@ -548,11 +755,15 @@ alembic downgrade -1
 
 ## Roadmap / Upcoming Features
 
+- [x] Prometheus metrics middleware
+- [x] Grafana observability stack
+- [x] Next.js frontend (Chat, Dashboard, RAG pages)
+- [x] Nginx reverse proxy
+- [x] Qdrant as a containerized Docker service
 - [ ] Fine-tuned FLAN-T5 (LoRA/PEFT on DialogSum) for local conversation summarization
 - [ ] Sentiment analysis and priority classification (high / medium / low)
 - [ ] Customer-facing confirmation email after ticket creation
 - [ ] Customer satisfaction survey after ticket resolution
-- [ ] Frontend (React / Next.js) interface
 - [ ] AWS EC2 deployment configuration
 - [ ] Rate limiting and API authentication
 
